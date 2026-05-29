@@ -1,6 +1,41 @@
 services:
+  # Base database - always required
+  postgres-age:
+    image: docker-postgres-age:latest
+    ports:
+      - "${POSTGRES_AGE_PORT:-55432}:5432"
+    environment:
+      - POSTGRES_USER=graphiti
+      - POSTGRES_PASSWORD=graphiti
+      - POSTGRES_DB=graphiti
+    volumes:
+      - postgres_age_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U graphiti -d graphiti"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  # Embedding service — OpenAI-compatible /v1/embeddings API
+  embedding-service:
+    build:
+      context: ./embedding_service
+    ports:
+      - "${EMBEDDING_PORT:-8080}:8080"
+    environment:
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      - EMBEDDING_DIM=${EMBEDDING_DIM:-384}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthcheck')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Mode 1: Server + postgres-age
   graph:
-    profiles: [""]
+    profiles: ["server", "all"]
     build:
       context: .
     ports:
@@ -17,76 +52,60 @@ services:
       timeout: 5s
       retries: 3
     depends_on:
-      neo4j:
+      postgres-age:
+        condition: service_healthy
+      embedding-service:
         condition: service_healthy
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - NEO4J_URI=bolt://neo4j:${NEO4J_PORT:-7687}
-      - NEO4J_USER=${NEO4J_USER:-neo4j}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-cp-p-VrckVTBayzd6jj5exz-n8tic3AyQUGedY-5dTOyXx3YjwkUl3kFdplVHsaGmy9buYVdUXCkBWgRnnrhUF6N-1H2aIY0BNYWTp-2MDgXqGEOHKO-nyYvHA}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.minimaxi.com/v1}
+      - OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME:-MiniMax-M2.7}
+      - USE_GENERIC_CLIENT=${USE_GENERIC_CLIENT:-true}
+      - EMBEDDER_PROVIDER=${EMBEDDER_PROVIDER:-openai}
+      - EMBEDDING_API_URL=http://embedding-service:8080/v1
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      - POSTGRES_AGE_DSN=postgresql://graphiti:graphiti@postgres-age:5432/graphiti
+      - POSTGRES_AGE_GRAPH_NAME=graphiti
+      - POSTGRES_AGE_EMBEDDING_DIMENSION=${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
       - PORT=8000
-      - db_backend=neo4j
-  neo4j:
-    image: neo4j:5.26.2
-    profiles: [""]
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "wget -qO- http://localhost:${NEO4J_PORT:-7474} || exit 1",
-        ]
-      interval: 1s
-      timeout: 10s
-      retries: 10
-      start_period: 3s
-    ports:
-      - "7474:7474" # HTTP
-      - "${NEO4J_PORT:-7687}:${NEO4J_PORT:-7687}" # Bolt
-    volumes:
-      - neo4j_data:/data
-    environment:
-      - NEO4J_AUTH=${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-password}
+      - db_backend=postgres_age
 
-  falkordb:
-    image: falkordb/falkordb:latest
-    profiles: ["falkordb"]
-    ports:
-      - "6379:6379"
-    volumes:
-      - falkordb_data:/data
-    environment:
-      - FALKORDB_ARGS=--port 6379 --cluster-enabled no
-    healthcheck:
-      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
-      interval: 1s
-      timeout: 10s
-      retries: 10
-      start_period: 3s
-  graph-falkordb:
+  # Mode 2: MCP-server + postgres-age
+  mcp-server:
+    profiles: ["mcp-server", "all"]
     build:
-      args:
-        INSTALL_FALKORDB: "true"
       context: .
-    profiles: ["falkordb"]
-    ports:
-      - "8001:8001"
+      dockerfile: mcp_server/docker/Dockerfile.standalone
     depends_on:
-      falkordb:
+      postgres-age:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/healthcheck')"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+      embedding-service:
+        condition: service_healthy
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - FALKORDB_HOST=falkordb
-      - FALKORDB_PORT=6379
-      - FALKORDB_DATABASE=default_db
-      - GRAPHITI_BACKEND=falkordb
-      - PORT=8001
-      - db_backend=falkordb
+      # Database configuration - use postgres_age provider
+      - DATABASE_PROVIDER=postgres_age
+      - POSTGRES_AGE_DSN=${POSTGRES_AGE_DSN:-postgresql://graphiti:graphiti@postgres-age:5432/graphiti}
+      - POSTGRES_AGE_GRAPH_NAME=${POSTGRES_AGE_GRAPH_NAME:-graphiti}
+      - POSTGRES_AGE_EMBEDDING_DIMENSION=${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
+      # Application configuration
+      - GRAPHITI_GROUP_ID=${GRAPHITI_GROUP_ID:-main}
+      - SEMAPHORE_LIMIT=${SEMAPHORE_LIMIT:-10}
+      - CONFIG_PATH=/app/mcp/config/config.yaml
+      - PATH=/root/.local/bin:${PATH}
+      # LLM configuration
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-cp-p-VrckVTBayzd6jj5exz-n8tic3AyQUGedY-5dTOyXx3YjwkUl3kFdplVHsaGmy9buYVdUXCkBWgRnnrhUF6N-1H2aIY0BNYWTp-2MDgXqGEOHKO-nyYvHA}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.minimaxi.com/v1}
+      - OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME:-MiniMax-M2.7}
+      - USE_GENERIC_CLIENT=${USE_GENERIC_CLIENT:-true}
+      # Embedding — use remote embedding service instead of in-process sentence-transformers
+      - EMBEDDING_API_URL=http://embedding-service:8080/v1
+    volumes:
+      - ./mcp_server/config/config-docker-postgres-age.yaml:/app/mcp/config/config.yaml:ro
+      - mcp_logs:/var/log/graphiti
+    ports:
+      - "8001:8000"
+    command: ["uv", "run", "main.py"]
 
 volumes:
-  neo4j_data:
-  falkordb_data:
+  postgres_age_data:
+  mcp_logs:

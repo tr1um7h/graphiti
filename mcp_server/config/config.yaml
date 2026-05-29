@@ -72,9 +72,14 @@ embedder:
       model: "voyage-3"
 
 database:
-  provider: "falkordb"  # Default: falkordb. Options: neo4j, falkordb
+  provider: "postgres_age"  # Default: postgres_age. Options: neo4j, falkordb, postgres_age
 
   providers:
+    postgres_age:
+      dsn: ${POSTGRES_AGE_DSN:postgresql://graphiti:graphiti@localhost:55432/graphiti}
+      graph_name: ${POSTGRES_AGE_GRAPH_NAME:graphiti}
+      embedding_dimension: ${POSTGRES_AGE_EMBEDDING_DIMENSION:384}
+
     falkordb:
       uri: ${FALKORDB_URI:redis://localhost:6379}
       password: ${FALKORDB_PASSWORD:}

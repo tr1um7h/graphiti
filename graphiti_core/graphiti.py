@@ -15,6 +15,7 @@ limitations under the License.
 """
 
 import logging
+import os
 from datetime import datetime
 from time import time
 from uuid import uuid4
@@ -27,7 +28,6 @@ from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.decorators import handle_multiple_group_ids
 from graphiti_core.driver.driver import GraphDriver
-from graphiti_core.driver.neo4j_driver import Neo4jDriver
 from graphiti_core.edges import (
     CommunityEdge,
     Edge,
@@ -158,11 +158,11 @@ class Graphiti:
         Parameters
         ----------
         uri : str
-            The URI of the Neo4j database.
+            (Deprecated) The URI of the Neo4j database. Ignored when graph_driver is None.
         user : str
-            The username for authenticating with the Neo4j database.
+            (Deprecated) The username for authenticating with the Neo4j database. Ignored.
         password : str
-            The password for authenticating with the Neo4j database.
+            (Deprecated) The password for authenticating with the Neo4j database. Ignored.
         llm_client : LLMClient | None, optional
             An instance of LLMClient for natural language processing tasks.
             If not provided, a default OpenAIClient will be initialized.
@@ -176,14 +176,16 @@ class Graphiti:
             Whether to store the raw content of episodes. Defaults to True.
         graph_driver : GraphDriver | None, optional
             An instance of GraphDriver for database operations.
-            If not provided, a default Neo4jDriver will be initialized.
+            If not provided, a default PostgresAgeDriver will be initialized using
+            POSTGRES_AGE_DSN, POSTGRES_AGE_GRAPH_NAME, and POSTGRES_AGE_EMBEDDING_DIMENSION
+            environment variables.
         max_coroutines : int | None, optional
             The maximum number of concurrent operations allowed. Overrides SEMAPHORE_LIMIT set in the environment.
             If not set, the Graphiti default is used.
         tracer : Tracer | None, optional
             An OpenTelemetry tracer instance for distributed tracing. If not provided, tracing is disabled (no-op).
         trace_span_prefix : str, optional
-            Prefix to prepend to all span names. Defaults to 'graphiti'.
+            Prefix to prepend to all span names. Defaults to ‘graphiti’.
 
         Returns
         -------
@@ -191,25 +193,33 @@ class Graphiti:
 
         Notes
         -----
-        This method establishes a connection to a graph database (Neo4j by default) using the provided
+        This method establishes a connection to a graph database (PostgresAge by default) using the provided
         credentials. It also sets up the LLM client, either using the provided client
         or by creating a default OpenAIClient.
 
         The default database name is defined during the driver’s construction. If a different database name
-        is required, it should be specified in the URI or set separately after
+        is required, it should be specified in the POSTGRES_AGE_DSN or set separately after
         initialization.
 
         The OpenAI API key is expected to be set in the environment variables.
         Make sure to set the OPENAI_API_KEY environment variable before initializing
-        Graphiti if you're using the default OpenAIClient.
+        Graphiti if you’re using the default OpenAIClient.
         """
 
         if graph_driver:
             self.driver = graph_driver
         else:
-            if uri is None:
-                raise ValueError('uri must be provided when graph_driver is None')
-            self.driver = Neo4jDriver(uri, user, password)
+            # Default to PostgresAgeDriver if no graph_driver is provided
+            from graphiti_core.driver.postgres_age import PostgresAgeDriver
+
+            dsn = os.getenv('POSTGRES_AGE_DSN', 'postgresql://graphiti:graphiti@localhost:55432/graphiti')
+            graph_name = os.getenv('POSTGRES_AGE_GRAPH_NAME', 'graphiti')
+            embedding_dimension = int(os.getenv('POSTGRES_AGE_EMBEDDING_DIMENSION', '384'))
+            self.driver = PostgresAgeDriver(
+                dsn=dsn,
+                graph_name=graph_name,
+                embedding_dimension=embedding_dimension,
+            )
 
         self.store_raw_episode_content = store_raw_episode_content
         self.max_coroutines = max_coroutines
@@ -220,7 +230,22 @@ class Graphiti:
         if embedder:
             self.embedder = embedder
         else:
-            self.embedder = OpenAIEmbedder()
+            embedder_provider = os.getenv('EMBEDDER_PROVIDER', 'openai')
+            if embedder_provider == 'sentence-transformers':
+                from graphiti_core.embedder.sentence_transformers import (
+                    SentenceTransformerEmbedder,
+                    SentenceTransformerEmbedderConfig,
+                )
+
+                embedding_dim = int(
+                    os.getenv('POSTGRES_AGE_EMBEDDING_DIMENSION', '384')
+                )
+                config = SentenceTransformerEmbedderConfig(
+                    embedding_dim=embedding_dim
+                )
+                self.embedder = SentenceTransformerEmbedder(config=config)
+            else:
+                self.embedder = OpenAIEmbedder()
         if cross_encoder:
             self.cross_encoder = cross_encoder
         else:

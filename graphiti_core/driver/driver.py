@@ -61,6 +61,7 @@ class GraphProvider(Enum):
     FALKORDB = 'falkordb'
     KUZU = 'kuzu'
     NEPTUNE = 'neptune'
+    POSTGRES_AGE = 'postgres_age'
 
 
 class GraphDriverSession(ABC):

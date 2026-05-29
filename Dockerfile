@@ -37,28 +37,18 @@ RUN groupadd -r app && useradd -r -d /app -g app app
 
 # Set up the server application first
 WORKDIR /app
-COPY ./server/pyproject.toml ./server/README.md ./server/uv.lock ./
+COPY ./server/pyproject.toml ./server/README.md ./
 COPY ./server/graph_service ./graph_service
+COPY ./pyproject.toml ./README.md ./graphiti_core/
+COPY ./graphiti_core ./graphiti_core
 
-# Install server dependencies (without graphiti-core from lockfile)
-# Then install graphiti-core from PyPI at the desired version
-# This prevents the stale lockfile from pinning an old graphiti-core version
-ARG INSTALL_FALKORDB=false
+# Install server dependencies
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev && \
-    if [ -n "$GRAPHITI_VERSION" ]; then \
-        if [ "$INSTALL_FALKORDB" = "true" ]; then \
-            uv pip install --system --upgrade "graphiti-core[falkordb]==$GRAPHITI_VERSION"; \
-        else \
-            uv pip install --system --upgrade "graphiti-core==$GRAPHITI_VERSION"; \
-        fi; \
-    else \
-        if [ "$INSTALL_FALKORDB" = "true" ]; then \
-            uv pip install --system --upgrade "graphiti-core[falkordb]"; \
-        else \
-            uv pip install --system --upgrade graphiti-core; \
-        fi; \
-    fi
+    rm -f uv.lock && \
+    uv venv /app/.venv --clear && \
+    . /app/.venv/bin/activate && \
+    uv pip install --no-deps -e ./graphiti_core && \
+    uv pip install pydantic psycopg[binary,pool] pgvector openai neo4j tenacity numpy python-dotenv posthog uvicorn fastapi httpx pydantic-settings
 
 # Change ownership to app user
 RUN chown -R app:app /app
@@ -74,5 +64,5 @@ USER app
 ENV PORT=8000
 EXPOSE $PORT
 
-# Use uv run for execution
-CMD ["uv", "run", "uvicorn", "graph_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use venv python directly to avoid runtime build
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "graph_service.main:app", "--host", "0.0.0.0", "--port", "8000"]

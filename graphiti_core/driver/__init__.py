@@ -16,4 +16,7 @@ limitations under the License.
 
 from neo4j import Neo4jDriver
 
+# PostgresAgeDriver is available but must be imported lazily to avoid circular imports.
+# Use: from graphiti_core.driver.postgres_age import PostgresAgeDriver directly.
+
 __all__ = ['Neo4jDriver']

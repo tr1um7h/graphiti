@@ -1,0 +1,101 @@
+# Graphiti MCP Server Configuration for Docker with PostgreSQL + AGE
+# This configuration is optimized for running with docker-compose-postgres-age.yml
+
+server:
+  transport: "http"  # HTTP transport (SSE is deprecated)
+  host: "0.0.0.0"
+  port: 8000
+
+llm:
+  provider: "openai"  # Options: openai, azure_openai, anthropic, gemini, groq
+  model: "MiniMax-M2.7"
+  max_tokens: 4096
+  use_generic_client: true  # Use chat/completions only — MiniMax does not support /v1/responses
+
+  providers:
+    openai:
+      api_key: ${OPENAI_API_KEY:-}
+      api_url: ${OPENAI_BASE_URL:-https://api.minimaxi.com/v1}
+      organization_id: ${OPENAI_ORGANIZATION_ID:}
+
+    azure_openai:
+      api_key: ${AZURE_OPENAI_API_KEY}
+      api_url: ${AZURE_OPENAI_ENDPOINT}
+      api_version: ${AZURE_OPENAI_API_VERSION:2024-10-21}
+      deployment_name: ${AZURE_OPENAI_DEPLOYMENT}
+      use_azure_ad: ${USE_AZURE_AD:false}
+
+    anthropic:
+      api_key: ${ANTHROPIC_API_KEY:-}
+      api_url: ${ANTHROPIC_API_URL:-https://api.minimaxi.com/anthropic}
+      max_retries: 3
+
+    gemini:
+      api_key: ${GOOGLE_API_KEY}
+      project_id: ${GOOGLE_PROJECT_ID:}
+      location: ${GOOGLE_LOCATION:us-central1}
+
+    groq:
+      api_key: ${GROQ_API_KEY}
+      api_url: ${GROQ_API_URL:https://api.groq.com/openai/v1}
+
+embedder:
+  provider: "openai"  # Use remote embedding service via OpenAI-compatible API
+  model: "all-MiniLM-L6-v2"
+  dimensions: 384
+
+  providers:
+    openai:
+      api_key: "not-needed"
+      api_url: ${EMBEDDING_API_URL:-http://embedding-service:8080/v1}
+      organization_id: ${OPENAI_ORGANIZATION_ID:}
+
+    azure_openai:
+      api_key: ${AZURE_OPENAI_API_KEY}
+      api_url: ${AZURE_OPENAI_EMBEDDINGS_ENDPOINT}
+      api_version: ${AZURE_OPENAI_API_VERSION:2024-10-21}
+      deployment_name: ${AZURE_OPENAI_EMBEDDINGS_DEPLOYMENT}
+      use_azure_ad: ${USE_AZURE_AD:false}
+
+    gemini:
+      api_key: ${GOOGLE_API_KEY}
+      project_id: ${GOOGLE_PROJECT_ID:}
+      location: ${GOOGLE_LOCATION:us-central1}
+
+    voyage:
+      api_key: ${VOYAGE_API_KEY}
+      api_url: ${VOYAGE_API_URL:https://api.voyageai.com/v1}
+      model: "voyage-3"
+
+database:
+  provider: "postgres_age"  # Using PostgreSQL + Apache AGE for this configuration
+
+  providers:
+    postgres_age:
+      dsn: ${POSTGRES_AGE_DSN:postgresql://graphiti:graphiti@postgres-age:5432/graphiti}
+      graph_name: ${POSTGRES_AGE_GRAPH_NAME:graphiti}
+      embedding_dimension: ${POSTGRES_AGE_EMBEDDING_DIMENSION:384}
+
+graphiti:
+  group_id: ${GRAPHITI_GROUP_ID:main}
+  episode_id_prefix: ${EPISODE_ID_PREFIX:}
+  user_id: ${USER_ID:mcp_user}
+  entity_types:
+    - name: "Preference"
+      description: "User preferences, choices, opinions, or selections (PRIORITIZE over most other types except User/Assistant)"
+    - name: "Requirement"
+      description: "Specific needs, features, or functionality that must be fulfilled"
+    - name: "Procedure"
+      description: "Standard operating procedures and sequential instructions"
+    - name: "Location"
+      description: "Physical or virtual places where activities occur"
+    - name: "Event"
+      description: "Time-bound activities, occurrences, or experiences"
+    - name: "Organization"
+      description: "Companies, institutions, groups, or formal entities"
+    - name: "Document"
+      description: "Information content in various forms (books, articles, reports, etc.)"
+    - name: "Topic"
+      description: "Subject of conversation, interest, or knowledge domain (use as last resort)"
+    - name: "Object"
+      description: "Physical items, tools, devices, or possessions (use as last resort)"

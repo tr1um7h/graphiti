@@ -12,13 +12,17 @@ license = "Apache-2.0"
 requires-python = ">=3.10,<4"
 dependencies = [
     "pydantic>=2.11.5",
-    "neo4j>=5.26.0",
+    "psycopg[binary,pool]>=3.2.0",
+    "pgvector>=0.3.6",
     "openai>=1.91.0",
     "tenacity>=9.0.0",
     "numpy>=1.0.0",
     "python-dotenv>=1.0.1",
     "posthog>=3.0.0"
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["graphiti_core"]
 
 [project.urls]
 Homepage = "https://help.getzep.com/graphiti/graphiti/overview"
@@ -36,6 +40,9 @@ neo4j-opensearch = ["boto3>=1.39.16", "opensearch-py>=3.0.0"]
 sentence-transformers = ["sentence-transformers>=3.2.1"]
 neptune = ["langchain-aws>=0.2.29", "opensearch-py>=3.0.0", "boto3>=1.39.16"]
 tracing = ["opentelemetry-api>=1.20.0", "opentelemetry-sdk>=1.20.0"]
+neo4j = ["neo4j>=5.26.0"]
+postgres-age = ["psycopg[binary,pool]>=3.2.0", "pgvector>=0.3.6"]
+providers = ["neo4j>=5.26.0", "falkordb>=1.1.2,<2.0.0"]
 dev = [
     "pyright>=1.1.404",
     "groq>=0.2.0",

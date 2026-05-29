@@ -196,17 +196,26 @@ class FalkorDBProviderConfig(BaseModel):
     database: str = 'default_db'
 
 
+class PostgresAgeProviderConfig(BaseModel):
+    """Postgres AGE provider configuration."""
+
+    dsn: str = 'postgresql://graphiti:graphiti@localhost:55432/graphiti'
+    graph_name: str = 'graphiti'
+    embedding_dimension: int | None = None
+
+
 class DatabaseProvidersConfig(BaseModel):
     """Database providers configuration."""
 
     neo4j: Neo4jProviderConfig | None = None
     falkordb: FalkorDBProviderConfig | None = None
+    postgres_age: PostgresAgeProviderConfig | None = None
 
 
 class DatabaseConfig(BaseModel):
     """Database configuration."""
 
-    provider: str = Field(default='falkordb', description='Database provider')
+    provider: str = Field(default='postgres_age', description='Database provider')
     providers: DatabaseProvidersConfig = Field(default_factory=DatabaseProvidersConfig)
 
 

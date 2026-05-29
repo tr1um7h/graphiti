@@ -65,6 +65,15 @@ if os.getenv('DISABLE_NEPTUNE') is None:
     except ImportError:
         raise
 
+# Postgres AGE driver (opt-in via ENABLE_POSTGRES_AGE)
+if os.getenv('ENABLE_POSTGRES_AGE') is not None:
+    try:
+        from graphiti_core.driver.postgres_age import PostgresAgeDriver
+
+        drivers.append(GraphProvider.POSTGRES_AGE)
+    except ImportError:
+        raise
+
 NEO4J_URI = os.getenv('NEO4J_URI', 'bolt://localhost:7687')
 NEO4J_USER = os.getenv('NEO4J_USER', 'neo4j')
 NEO4J_PASSWORD = os.getenv('NEO4J_PASSWORD', 'test')
@@ -79,6 +88,11 @@ NEPTUNE_PORT = os.getenv('NEPTUNE_PORT', 8182)
 AOSS_HOST = os.getenv('AOSS_HOST', None)
 
 KUZU_DB = os.getenv('KUZU_DB', ':memory:')
+
+POSTGRES_AGE_DSN = os.getenv(
+    'POSTGRES_AGE_DSN',
+    'postgresql://graphiti:graphiti@localhost:55432/graphiti',
+)
 
 group_id = 'graphiti_test_group'
 group_id_2 = 'graphiti_test_group_2'
@@ -108,6 +122,12 @@ def get_driver(provider: GraphProvider) -> GraphDriver:
             host=NEPTUNE_HOST,
             port=int(NEPTUNE_PORT),
             aoss_host=AOSS_HOST,
+        )
+    elif provider == GraphProvider.POSTGRES_AGE:
+        return PostgresAgeDriver(
+            dsn=POSTGRES_AGE_DSN,
+            graph_name='graphiti_test_core',
+            embedding_dimension=embedding_dim,
         )
     else:
         raise ValueError(f'Driver {provider} not available')

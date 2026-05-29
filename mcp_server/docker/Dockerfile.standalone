@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Standalone Graphiti MCP Server Image
-# This image runs only the MCP server and connects to an external database (Neo4j or FalkorDB)
+# This image runs only the MCP server and connects to an external database
 
 FROM python:3.11-slim-bookworm
 
@@ -27,34 +27,32 @@ ENV UV_COMPILE_BYTECODE=1 \
 # Set up MCP server directory
 WORKDIR /app/mcp
 
-# Accept graphiti-core version as build argument
-ARG GRAPHITI_CORE_VERSION=0.28.1
-
 # Copy project files for dependency installation
-COPY pyproject.toml uv.lock ./
+COPY mcp_server/pyproject.toml mcp_server/uv.lock ./
 
-# Remove the local path override for graphiti-core in Docker builds
-# Install with BOTH neo4j and falkordb extras for maximum flexibility
-# and regenerate lock file to match the PyPI version
-RUN sed -i '/\[tool\.uv\.sources\]/,/graphiti-core/d' pyproject.toml && \
-    sed -i "s/graphiti-core\[falkordb\][>=]\+[0-9]\+\.[0-9]\+\.[0-9]\+/graphiti-core[neo4j,falkordb]==${GRAPHITI_CORE_VERSION}/" pyproject.toml && \
-    echo "Regenerating lock file for PyPI graphiti-core..." && \
-    rm -f uv.lock && \
-    uv lock
+# Copy graphiti-core with all needed files
+COPY pyproject.toml README.md ./graphiti_core/
+COPY graphiti_core /app/mcp/graphiti_core
 
-# Install Python dependencies (exclude dev dependency group)
-# Include optional provider extras so the image matches the providers
-# advertised by the MCP server configuration and docs.
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-group dev --extra providers --extra azure
+# Install graphiti-core from local path, then sync remaining dependencies
+# Note: sentence-transformers is CPU-only via pytorch+cpu index
+RUN uv venv /app/mcp/.venv && \
+    . /app/mcp/.venv/bin/activate && \
+    uv pip install --no-deps -e ./graphiti_core && \
+    uv sync --no-group dev && \
+    uv pip install pgvector>=0.3.6 psycopg[binary,pool]>=3.2.0
+
+# Set up environment to use the venv
+ENV VIRTUAL_ENV=/app/mcp/.venv
+ENV PATH="/app/mcp/.venv/bin:${PATH}"
 
 # Store graphiti-core version
-RUN echo "${GRAPHITI_CORE_VERSION}" > /app/mcp/.graphiti-core-version
+RUN echo "0.29.1-local" > /app/mcp/.graphiti-core-version
 
 # Copy MCP server application code
-COPY main.py ./
-COPY src/ ./src/
-COPY config/ ./config/
+COPY mcp_server/main.py ./
+COPY mcp_server/src/ ./src/
+COPY mcp_server/config/ ./config/
 
 # Create log directory
 RUN mkdir -p /var/log/graphiti
@@ -70,7 +68,7 @@ LABEL org.opencontainers.image.title="Graphiti MCP Server (Standalone)" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.vendor="Zep AI" \
       org.opencontainers.image.source="https://github.com/zep-ai/graphiti" \
-      graphiti.core.version="${GRAPHITI_CORE_VERSION}"
+      graphiti.core.version="0.29.1-local"
 
 # Expose MCP server port
 EXPOSE 8000
@@ -80,4 +78,4 @@ HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the MCP server
-CMD ["uv", "run", "--no-sync", "main.py"]
+CMD ["/app/mcp/.venv/bin/python", "-m", "main.py"]
