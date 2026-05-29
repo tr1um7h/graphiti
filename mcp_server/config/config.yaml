@@ -14,6 +14,7 @@ llm:
   provider: "openai"  # Options: openai, azure_openai, anthropic, gemini, groq
   model: "gpt-4o-mini"
   max_tokens: 4096
+  use_generic_client: ${USE_GENERIC_CLIENT:false}  # Set to true for OpenAI-compatible providers without /v1/responses support (e.g. MiniMax, Ollama)
   
   providers:
     openai:

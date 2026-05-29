@@ -152,6 +152,11 @@ class LLMConfig(BaseModel):
         default=None, description='Temperature (optional, defaults to None for reasoning models)'
     )
     max_tokens: int = Field(default=4096, description='Max tokens')
+    use_generic_client: bool = Field(
+        default=False,
+        description='Use OpenAIGenericClient (chat/completions only) instead of OpenAIClient (responses API). '
+        'Set to true for OpenAI-compatible providers that do not support the /v1/responses endpoint (e.g. MiniMax, Ollama).',
+    )
     providers: LLMProvidersConfig = Field(default_factory=LLMProvidersConfig)
 
 

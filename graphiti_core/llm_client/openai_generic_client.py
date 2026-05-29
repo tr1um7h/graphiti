@@ -112,22 +112,55 @@ class OpenAIGenericClient(LLMClient):
             if response_model is not None:
                 schema_name = getattr(response_model, '__name__', 'structured_response')
                 json_schema = response_model.model_json_schema()
-                response_format = {
-                    'type': 'json_schema',
-                    'json_schema': {
-                        'name': schema_name,
-                        'schema': json_schema,
-                    },
-                }
 
-            response = await self.client.chat.completions.create(
+                # For providers that don't support OpenAI's json_schema response_format
+                # (e.g. MiniMax), inject the schema into the system prompt and fall back
+                # to json_object. This ensures structured output across all providers.
+                schema_instruction = (
+                    f'\n\nYou MUST respond with a JSON object that strictly matches '
+                    f'the following JSON Schema:\n```json\n{json.dumps(json_schema, indent=2)}\n```\n'
+                    f'Return ONLY the JSON object, no additional text or markdown formatting.'
+                )
+                # Inject schema into the first system message
+                injected = False
+                for m in openai_messages:
+                    if m.get('role') == 'system':
+                        m['content'] = (m.get('content') or '') + schema_instruction
+                        injected = True
+                        break
+                if not injected:
+                    openai_messages.insert(0, {
+                        'role': 'system',
+                        'content': schema_instruction.strip(),
+                    })
+                # Use json_object instead of json_schema for broader compatibility
+                response_format = {'type': 'json_object'}
+
+            # Build request kwargs
+            request_kwargs: dict[str, Any] = dict(
                 model=self.model or DEFAULT_MODEL,
                 messages=openai_messages,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 response_format=response_format,  # type: ignore[arg-type]
             )
+
+            # For thinking/reasoning models (e.g. MiniMax M2.7), request reasoning
+            # in a separate field so it doesn't pollute the JSON content
+            request_kwargs['extra_body'] = {'reasoning_split': True}
+
+            response = await self.client.chat.completions.create(**request_kwargs)
             result = response.choices[0].message.content or ''
+
+            # Clean up response: strip <think> tags and markdown code blocks
+            import re as _re
+
+            result = _re.sub(r'<think>.*?</think>', '', result, flags=_re.DOTALL).strip()
+            # Strip markdown code blocks (```json ... ``` or ``` ... ```)
+            code_block = _re.search(r'```(?:json)?\s*\n?(.*?)```', result, _re.DOTALL)
+            if code_block:
+                result = code_block.group(1).strip()
+
             return json.loads(result)
         except openai.RateLimitError as e:
             raise RateLimitError from e
