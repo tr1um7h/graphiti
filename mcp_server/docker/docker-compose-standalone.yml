@@ -1,0 +1,44 @@
+services:
+  graphiti-mcp:
+    image: graphiti-mcp-standalone:oracle
+    build:
+      context: ../..
+      dockerfile: mcp_server/docker/Dockerfile.oracle
+    container_name: graphiti-mcp
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - DATABASE_PROVIDER=postgres_age
+      - POSTGRES_AGE_DSN=${POSTGRES_AGE_DSN}
+      - POSTGRES_AGE_GRAPH_NAME=${POSTGRES_AGE_GRAPH_NAME:-graphiti}
+      - POSTGRES_AGE_EMBEDDING_DIMENSION=${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
+      - GRAPHITI_GROUP_ID=${GRAPHITI_GROUP_ID:-main}
+      - SEMAPHORE_LIMIT=${SEMAPHORE_LIMIT:-10}
+      - CONFIG_PATH=/app/mcp/config/config.yaml
+      - PATH=/root/.local/bin:${PATH}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL}
+      - OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME:-MiniMax-M2.7}
+      - EMBEDDING_API_URL=${EMBEDDING_API_URL}
+    volumes:
+      - ../config/config-oracle.yaml:/app/mcp/config/config.yaml:ro
+      - mcp_logs:/var/log/graphiti
+    ports:
+      - "${MCP_PORT:-8800}:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    # Allow container to access host services via host.docker.internal
+    # (Linux needs extra_hosts; macOS/Windows Docker Desktop provides it automatically)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # 启动前先运行预检，通过后再启动 MCP Server
+    entrypoint: ["/app/mcp/scripts/entrypoint.sh"]
+
+volumes:
+  mcp_logs:
+    driver: local
