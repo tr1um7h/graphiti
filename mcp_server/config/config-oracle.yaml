@@ -8,7 +8,7 @@ server:
 
 llm:
   provider: "openai"
-  model: "MiniMax-M2.7"
+  model: ${OPENAI_MODEL_NAME:MiniMax-M2.7}
   max_tokens: 4096
   use_generic_client: true  # Use chat/completions only — MiniMax does not support /v1/responses
 
@@ -19,8 +19,8 @@ llm:
 
 embedder:
   provider: "openai"  # Use remote embedding service via OpenAI-compatible API
-  model: "all-MiniLM-L6-v2"
-  dimensions: 384
+  model: ${EMBEDDING_MODEL:all-MiniLM-L6-v2}
+  dimensions: ${EMBEDDING_DIM:384}
 
   providers:
     openai:

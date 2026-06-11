@@ -1,45 +1,24 @@
+# Graphiti Docker Compose — 仅管理 server 和 mcp-server
+#
+# 前置依赖（需提前启动）：
+#   1. pg-age 数据库：cd /path/to/pg-age && docker compose up -d
+#      容器内通过 host.docker.internal + 宿主机端口访问
+#   2. embedding-service：本地已启动的 embedding 服务（默认 http://localhost:8080）
+#
+# 启动方式：
+#   docker compose --profile all up -d          # 同时启动 server + mcp-server
+#   docker compose --profile server up -d       # 仅启动 server
+#   docker compose --profile mcp-server up -d   # 仅启动 mcp-server
+
 services:
-  # Base database - always required
-  postgres-age:
-    image: docker-postgres-age:latest
-    ports:
-      - "${POSTGRES_AGE_PORT:-55432}:5432"
-    environment:
-      - POSTGRES_USER=graphiti
-      - POSTGRES_PASSWORD=graphiti
-      - POSTGRES_DB=graphiti
-    volumes:
-      - postgres_age_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U graphiti -d graphiti"]
-      interval: 2s
-      timeout: 5s
-      retries: 30
-      start_period: 10s
-
-  # Embedding service — OpenAI-compatible /v1/embeddings API
-  embedding-service:
-    build:
-      context: ./embedding_service
-    ports:
-      - "${EMBEDDING_PORT:-8080}:8080"
-    environment:
-      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
-      - EMBEDDING_DIM=${EMBEDDING_DIM:-384}
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthcheck')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # Mode 1: Server + postgres-age
-  graph:
+  # Graphiti REST API Server
+  server:
     profiles: ["server", "all"]
     build:
       context: .
+    container_name: graphiti-server
     ports:
-      - "8000:8000"
+      - "${SERVER_PORT:-8000}:8000"
     healthcheck:
       test:
         [
@@ -51,61 +30,60 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-    depends_on:
-      postgres-age:
-        condition: service_healthy
-      embedding-service:
-        condition: service_healthy
+      start_period: 15s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-cp-p-VrckVTBayzd6jj5exz-n8tic3AyQUGedY-5dTOyXx3YjwkUl3kFdplVHsaGmy9buYVdUXCkBWgRnnrhUF6N-1H2aIY0BNYWTp-2MDgXqGEOHKO-nyYvHA}
+      # LLM 配置
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.minimaxi.com/v1}
       - OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME:-MiniMax-M2.7}
       - USE_GENERIC_CLIENT=${USE_GENERIC_CLIENT:-true}
+      # Embedding 配置 — 使用本地已启动的 embedding-service
       - EMBEDDER_PROVIDER=${EMBEDDER_PROVIDER:-openai}
-      - EMBEDDING_API_URL=http://embedding-service:8080/v1
+      - EMBEDDING_API_URL=${EMBEDDING_API_URL:-http://host.docker.internal:8080/v1}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
-      - POSTGRES_AGE_DSN=postgresql://graphiti:graphiti@postgres-age:5432/graphiti
-      - POSTGRES_AGE_GRAPH_NAME=graphiti
+      # PostgreSQL AGE 数据库配置 — 通过 IP+端口直连
+      - POSTGRES_AGE_DSN=postgresql://graphiti:graphiti@${POSTGRES_AGE_HOST:-host.docker.internal}:${POSTGRES_AGE_PORT:-55432}/graphiti
+      - POSTGRES_AGE_GRAPH_NAME=${POSTGRES_AGE_GRAPH_NAME:-graphiti}
       - POSTGRES_AGE_EMBEDDING_DIMENSION=${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
+      # 服务配置
       - PORT=8000
       - db_backend=postgres_age
 
-  # Mode 2: MCP-server + postgres-age
+  # Graphiti MCP Server
   mcp-server:
     profiles: ["mcp-server", "all"]
     build:
       context: .
       dockerfile: mcp_server/docker/Dockerfile.standalone
-    depends_on:
-      postgres-age:
-        condition: service_healthy
-      embedding-service:
-        condition: service_healthy
+    container_name: graphiti-mcp-server
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
-      # Database configuration - use postgres_age provider
+      # 数据库配置 — 通过 IP+端口直连
       - DATABASE_PROVIDER=postgres_age
-      - POSTGRES_AGE_DSN=${POSTGRES_AGE_DSN:-postgresql://graphiti:graphiti@postgres-age:5432/graphiti}
+      - POSTGRES_AGE_DSN=${POSTGRES_AGE_DSN:-postgresql://graphiti:graphiti@${POSTGRES_AGE_HOST:-host.docker.internal}:${POSTGRES_AGE_PORT:-55432}/graphiti}
       - POSTGRES_AGE_GRAPH_NAME=${POSTGRES_AGE_GRAPH_NAME:-graphiti}
       - POSTGRES_AGE_EMBEDDING_DIMENSION=${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
-      # Application configuration
+      # 应用配置
       - GRAPHITI_GROUP_ID=${GRAPHITI_GROUP_ID:-main}
       - SEMAPHORE_LIMIT=${SEMAPHORE_LIMIT:-10}
       - CONFIG_PATH=/app/mcp/config/config.yaml
       - PATH=/root/.local/bin:${PATH}
-      # LLM configuration
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-sk-cp-p-VrckVTBayzd6jj5exz-n8tic3AyQUGedY-5dTOyXx3YjwkUl3kFdplVHsaGmy9buYVdUXCkBWgRnnrhUF6N-1H2aIY0BNYWTp-2MDgXqGEOHKO-nyYvHA}
+      # LLM 配置
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.minimaxi.com/v1}
       - OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME:-MiniMax-M2.7}
       - USE_GENERIC_CLIENT=${USE_GENERIC_CLIENT:-true}
-      # Embedding — use remote embedding service instead of in-process sentence-transformers
-      - EMBEDDING_API_URL=http://embedding-service:8080/v1
+      # Embedding 配置 — 使用本地已启动的 embedding-service
+      - EMBEDDING_API_URL=${EMBEDDING_API_URL:-http://host.docker.internal:8080/v1}
     volumes:
       - ./mcp_server/config/config-docker-postgres-age.yaml:/app/mcp/config/config.yaml:ro
       - mcp_logs:/var/log/graphiti
     ports:
-      - "8001:8000"
+      - "${MCP_PORT:-8001}:8000"
     command: ["uv", "run", "main.py"]
 
 volumes:
-  postgres_age_data:
   mcp_logs:

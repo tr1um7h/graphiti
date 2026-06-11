@@ -47,7 +47,7 @@ embedder:
   providers:
     openai:
       api_key: "not-needed"
-      api_url: ${EMBEDDING_API_URL:-http://embedding-service:8080/v1}
+      api_url: ${EMBEDDING_API_URL:-http://host.docker.internal:8080/v1}
       organization_id: ${OPENAI_ORGANIZATION_ID:}
 
     azure_openai:
