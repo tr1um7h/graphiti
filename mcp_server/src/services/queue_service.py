@@ -79,6 +79,38 @@ class QueueService:
             self._queue_workers[group_id] = False
             logger.info(f'Stopped episode queue worker for group_id: {group_id}')
 
+    async def drain_group(self, group_id: str, timeout: float = 120.0) -> None:
+        """Wait for all pending episodes for a specific group_id to complete.
+
+        This is essential before operations like clear_graph to prevent a race
+        condition where background episode processing inserts records after the
+        clear operation has deleted existing data.
+
+        Args:
+            group_id: The group ID whose queue should be drained
+            timeout: Maximum seconds to wait for the queue to drain
+        """
+        queue = self._episode_queues.get(group_id)
+        if queue is None:
+            return
+
+        if queue.qsize() == 0 and not self._queue_workers.get(group_id, False):
+            return
+
+        logger.info(
+            f'Draining episode queue for group_id: {group_id} '
+            f'(pending={queue.qsize()}, worker_active={self._queue_workers.get(group_id, False)})'
+        )
+
+        try:
+            await asyncio.wait_for(queue.join(), timeout=timeout)
+            logger.info(f'Episode queue drained for group_id: {group_id}')
+        except asyncio.TimeoutError:
+            logger.warning(
+                f'Timeout waiting for episode queue to drain for group_id: {group_id} '
+                f'(remaining={queue.qsize()})'
+            )
+
     def get_queue_size(self, group_id: str) -> int:
         """Get the current queue size for a group_id."""
         if group_id not in self._episode_queues:

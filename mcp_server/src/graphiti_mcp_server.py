@@ -727,7 +727,7 @@ async def clear_graph(group_ids: list[str] | None = None) -> SuccessResponse | E
     Args:
         group_ids: Optional list of group IDs to clear. If not provided, clears the default group.
     """
-    global graphiti_service
+    global graphiti_service, queue_service
 
     if graphiti_service is None:
         return ErrorResponse(error='Graphiti service not initialized')
@@ -742,6 +742,12 @@ async def clear_graph(group_ids: list[str] | None = None) -> SuccessResponse | E
 
         if not effective_group_ids:
             return ErrorResponse(error='No group IDs specified for clearing')
+
+        # Drain pending episode queues BEFORE clearing to prevent a race condition
+        # where background episode processing inserts records after the clear.
+        if queue_service is not None:
+            for gid in effective_group_ids:
+                await queue_service.drain_group(gid)
 
         # Clear data for the specified group IDs
         await clear_data(client.driver, group_ids=effective_group_ids)
