@@ -314,7 +314,17 @@ class GraphitiService:
                 raise
 
             # Build indices
-            await self.client.build_indices_and_constraints()
+            delete_existing = os.environ.get('GRAPHITI_DELETE_EXISTING', '').lower() in (
+                'true',
+                '1',
+                'yes',
+            )
+            if delete_existing:
+                logger.warning(
+                    'GRAPHITI_DELETE_EXISTING is set — dropping and rebuilding schema. '
+                    'All graph data will be lost.'
+                )
+            await self.client.build_indices_and_constraints(delete_existing=delete_existing)
 
             logger.info('Successfully initialized Graphiti client')
 
