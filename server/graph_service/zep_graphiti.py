@@ -30,7 +30,7 @@ def _create_embedder(settings) -> EmbedderClient | None:
         config = OpenAIEmbedderConfig(
             api_key='not-needed',
             base_url=embedding_url,
-            embedding_model=settings.embedding_model_name or 'all-MiniLM-L6-v2',
+            embedding_model=settings.embedding_model or 'all-MiniLM-L6-v2',
             embedding_dim=settings.postgres_age_embedding_dimension,
         )
         return OpenAIEmbedder(config=config)

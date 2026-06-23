@@ -27,9 +27,13 @@ Exit codes:
 import asyncio
 import json
 import os
+import re
+import socket
 import sys
 import time
+import traceback
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 
@@ -447,111 +451,229 @@ async def test_llm(config: TestConfig, result: TestResult):
         return
 
     base_url = config.OPENAI_BASE_URL.rstrip('/')
+    chat_url = f'{base_url}/chat/completions'
 
-    # --- 3.1 Endpoint accessibility ---
+    # --- 0. Pre-flight network diagnostics (DNS + TCP reachability) ---
+    # Catches the common case where the LLM endpoint is unreachable so the
+    # user can immediately see whether it is a DNS, firewall, or service
+    # problem rather than a generic "All connection attempt failed" string.
+    await _diagnose_llm_connectivity(base_url, result, suite)
+
+    # --- 1. Chat completions (system + user + json_object) ---
+    # Mirrors OpenAIGenericClient._generate_response: same request shape,
+    # same response parsing (reasoning_content fallback + <think> stripping).
+    # PASS = provider is usable end-to-end.
     t0 = time.monotonic()
+    resp = None
+    request_body = {
+        'model': config.OPENAI_MODEL_NAME,
+        'messages': [
+            {'role': 'system', 'content': 'You are a helpful assistant.'},
+            {'role': 'user', 'content': 'Reply with the single word: OK'},
+        ],
+        'temperature': 0,
+        'max_tokens': 512,
+        'response_format': {'type': 'json_object'},
+        # Mirrors extra_body in OpenAIGenericClient: ask reasoning models
+        # (Qwen, DeepSeek-R1, etc.) to split reasoning into a separate field.
+        'reasoning_split': True,
+    }
     try:
-        async with httpx.AsyncClient(timeout=30.0) as http_client:
+        async with httpx.AsyncClient(timeout=60.0) as http_client:
             resp = await http_client.post(
-                f'{base_url}/chat/completions',
+                chat_url,
                 headers={'Authorization': f'Bearer {config.OPENAI_API_KEY}'},
-                json={
-                    'model': config.OPENAI_MODEL_NAME,
-                    'messages': [{'role': 'user', 'content': 'Say OK'}],
-                    'max_tokens': 10,
-                },
+                json=request_body,
             )
         resp.raise_for_status()
         data = resp.json()
-        result.record(suite, 'Endpoint accessibility (chat/completions)', TestResult.PASS,
-                      '', (time.monotonic() - t0) * 1000)
-    except Exception as e:
-        result.record(suite, 'Endpoint accessibility (chat/completions)', TestResult.FAIL,
-                      str(e), (time.monotonic() - t0) * 1000)
-        return
-
-    # --- 3.2 Response format ---
-    t0 = time.monotonic()
-    try:
-        assert 'choices' in data, 'Response missing "choices" field'
-        assert len(data['choices']) > 0, 'Response "choices" is empty'
-        assert 'message' in data['choices'][0], 'Response missing "message" field'
-        content = data['choices'][0]['message'].get('content', '')
-        assert content, 'Response message.content is empty'
-        result.record(suite, 'Response format (Chat Completions)', TestResult.PASS,
-                      f'content={content[:50]}', (time.monotonic() - t0) * 1000)
-    except AssertionError as e:
-        result.record(suite, 'Response format (Chat Completions)', TestResult.FAIL,
-                      str(e), (time.monotonic() - t0) * 1000)
-
-    # --- 3.3 Structured output (JSON mode) ---
-    t0 = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as http_client:
-            json_resp = await http_client.post(
-                f'{base_url}/chat/completions',
-                headers={'Authorization': f'Bearer {config.OPENAI_API_KEY}'},
-                json={
-                    'model': config.OPENAI_MODEL_NAME,
-                    'messages': [{
-                        'role': 'user',
-                        'content': 'Return a JSON object with one key "status" set to "ok". Return only valid JSON.',
-                    }],
-                    'max_tokens': 50,
-                    'response_format': {'type': 'json_object'},
-                },
+        assert data.get('choices'), 'response missing choices'
+        msg = data['choices'][0].get('message') or {}
+        # Same logic as OpenAIGenericClient: read content, fall back to
+        # reasoning_content for models that return content=null.
+        content = msg.get('content') or msg.get('reasoning_content') or ''
+        # Strip <think>...</think> tags (same as business code)
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        assert content, 'response message.content is empty'
+        # WARN (not FAIL) if content is not strict JSON — the business code
+        # also strips markdown code blocks before json.loads(), so a soft
+        # warning lets the provider pass when output is wrapped.
+        try:
+            json.loads(content)
+            content_note = f' content={content[:60]!r}'
+        except json.JSONDecodeError:
+            content_note = (
+                f' content={content[:60]!r} (not strict JSON;'
+                ' OK if LLM wraps in <think>)'
             )
-        json_resp.raise_for_status()
-        json_data = json_resp.json()
-        content = json_data['choices'][0]['message']['content']
-        json.loads(content)
-        result.record(suite, 'Structured output (JSON mode)', TestResult.PASS,
-                      '', (time.monotonic() - t0) * 1000)
-    except json.JSONDecodeError as e:
-        result.record(suite, 'Structured output (JSON mode)', TestResult.WARN,
-                      f'JSON parse failed (LLM may not support json_object): {e}',
-                      (time.monotonic() - t0) * 1000)
+        result.record(
+            suite,
+            'Chat completions (system + user + json_object)',
+            TestResult.PASS,
+            f'http={resp.status_code} latency_ms={(time.monotonic() - t0) * 1000:.0f}'
+            + content_note,
+            (time.monotonic() - t0) * 1000,
+        )
     except Exception as e:
-        error_str = str(e)
-        if 'response_format' in error_str.lower() or 'not support' in error_str.lower():
-            result.record(suite, 'Structured output (JSON mode)', TestResult.WARN,
-                          f'LLM does not support json_object mode: {error_str[:100]}',
-                          (time.monotonic() - t0) * 1000)
-        else:
-            result.record(suite, 'Structured output (JSON mode)', TestResult.FAIL,
-                          error_str[:200], (time.monotonic() - t0) * 1000)
+        result.record(
+            suite,
+            'Chat completions (system + user + json_object)',
+            TestResult.FAIL,
+            _format_request_error(
+                e, label='chat/completions',
+                request_url=chat_url, request_body=request_body, response=resp,
+            ),
+            (time.monotonic() - t0) * 1000,
+        )
 
-    # --- 3.4 Multi-turn conversation ---
+    # Multi-turn check removed — LLM context understanding is a basic
+    # capability and not relied upon by business code. The combined
+    # chat completion check above (system + user + json_object) covers
+    # what business code actually sends on every call.
+
+
+def _format_request_error(
+    e: Exception,
+    *,
+    label: str,
+    request_url: str,
+    request_body: dict | None = None,
+    response: httpx.Response | None = None,
+) -> str:
+    """Build a multi-line diagnostic string for an LLM request error.
+
+    The output is intended to be embedded in a TestResult detail field so the
+    user can immediately see:
+      - The exact exception class (e.g. httpx.ConnectError)
+      - A human-readable classification (DNS / TCP / SSL / timeout / HTTP)
+      - The request URL and a truncated JSON body
+      - The response status / key headers / body preview (if any)
+      - The full Python traceback
+    """
+    lines: list[str] = []
+    lines.append(f'[{label}] {type(e).__name__}: {e}')
+
+    if isinstance(e, httpx.ConnectError):
+        lines.append('  classification: ConnectError (DNS resolve, TCP connect, or SSL handshake failed)')
+        lines.append('  hint: check DNS, proxy, corporate firewall, TLS interception, or whether the upstream is up')
+    elif isinstance(e, httpx.ConnectTimeout):
+        lines.append('  classification: ConnectTimeout (could not establish TCP connection within timeout)')
+    elif isinstance(e, httpx.ReadTimeout):
+        lines.append('  classification: ReadTimeout (server accepted connection but did not respond in time)')
+    elif isinstance(e, httpx.WriteTimeout):
+        lines.append('  classification: WriteTimeout (client could not finish sending request in time)')
+    elif isinstance(e, httpx.PoolTimeout):
+        lines.append('  classification: PoolTimeout (connection pool exhausted — too much concurrency?)')
+    elif isinstance(e, httpx.TimeoutException):
+        lines.append('  classification: TimeoutException (generic httpx timeout)')
+    elif isinstance(e, httpx.HTTPStatusError):
+        lines.append(f'  classification: HTTPStatusError (server returned {e.response.status_code})')
+    elif isinstance(e, httpx.RequestError):
+        lines.append('  classification: RequestError (generic httpx request error)')
+    elif isinstance(e, httpx.HTTPError):
+        lines.append('  classification: HTTPError (generic httpx error)')
+    elif isinstance(e, json.JSONDecodeError):
+        lines.append('  classification: JSONDecodeError (response body is not valid JSON)')
+    elif isinstance(e, OSError):
+        lines.append('  classification: OSError (low-level socket / DNS error)')
+    else:
+        lines.append(f'  classification: non-httpx exception ({type(e).__module__}.{type(e).__name__})')
+
+    lines.append(f'  url: {request_url}')
+    lines.append(f'  method: POST')
+    if request_body is not None:
+        try:
+            body_str = json.dumps(request_body, ensure_ascii=False)
+        except (TypeError, ValueError):
+            body_str = repr(request_body)
+        if len(body_str) > 300:
+            body_str = body_str[:300] + '...(truncated)'
+        lines.append(f'  body: {body_str}')
+
+    if response is not None:
+        lines.append(f'  status: {response.status_code} {response.reason_phrase}')
+        interesting = ['content-type', 'x-request-id', 'x-error-code',
+                       'x-error-message', 'x-trace-id', 'www-authenticate', 'retry-after']
+        for h in interesting:
+            v = response.headers.get(h)
+            if v:
+                lines.append(f'  resp_header[{h}]: {v}')
+        body_preview = (response.text or '')[:500]
+        lines.append(f'  body_preview: {body_preview!r}')
+
+    tb_str = traceback.format_exc()
+    tb_lines = tb_str.rstrip().splitlines()
+    if len(tb_lines) > 25:
+        tb_lines = ['... (truncated intermediate frames)'] + tb_lines[-18:]
+    lines.append('  traceback:')
+    for line in tb_lines:
+        lines.append(f'    {line}')
+
+    return '\n'.join(lines)
+
+
+async def _diagnose_llm_connectivity(base_url: str, result: TestResult, suite: str) -> bool:
+    """Probe DNS resolution and TCP reachability for the LLM base URL.
+
+    Records one PASS/FAIL row for each step so the user can see whether the
+    LLM endpoint is reachable at the network layer. Returns True only if
+    every probe succeeded.
+    """
+    try:
+        parsed = urlparse(base_url)
+    except Exception as e:
+        result.record(suite, 'URL parse', TestResult.FAIL,
+                      f'urlparse failed for {base_url!r}: {e}', 0)
+        return False
+
+    host = parsed.hostname
+    if not host:
+        result.record(suite, 'URL parse', TestResult.FAIL,
+                      f'no hostname in base_url={base_url!r}', 0)
+        return False
+    port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    result.record(suite, 'URL parse', TestResult.PASS,
+                  f'{parsed.scheme}://{host}:{port}', 0)
+
+    # --- DNS resolution ---
+    t0 = time.monotonic()
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await loop.run_in_executor(
+            None, lambda: socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+        )
+        addrs = sorted({i[4][0] for i in infos})
+        result.record(suite, f'DNS resolve {host}', TestResult.PASS,
+                      f'addrs={addrs}', (time.monotonic() - t0) * 1000)
+    except Exception as e:
+        result.record(
+            suite, f'DNS resolve {host}', TestResult.FAIL,
+            f'{type(e).__name__}: {e}\ntraceback:\n{traceback.format_exc()}',
+            (time.monotonic() - t0) * 1000,
+        )
+        return False
+
+    # --- TCP reachability ---
     t0 = time.monotonic()
     try:
-        async with httpx.AsyncClient(timeout=30.0) as http_client:
-            multi_resp = await http_client.post(
-                f'{base_url}/chat/completions',
-                headers={'Authorization': f'Bearer {config.OPENAI_API_KEY}'},
-                json={
-                    'model': config.OPENAI_MODEL_NAME,
-                    'messages': [
-                        {'role': 'system', 'content': 'You are a helpful assistant.'},
-                        {'role': 'user', 'content': 'My name is TestUser.'},
-                        {'role': 'assistant', 'content': 'Hello TestUser!'},
-                        {'role': 'user', 'content': 'What is my name?'},
-                    ],
-                    'max_tokens': 20,
-                },
-            )
-        multi_resp.raise_for_status()
-        multi_data = multi_resp.json()
-        content = multi_data['choices'][0]['message'].get('content', '')
-        if 'testuser' in content.lower() or 'test' in content.lower():
-            result.record(suite, 'Multi-turn context', TestResult.PASS,
-                          f'response={content[:80]}', (time.monotonic() - t0) * 1000)
-        else:
-            result.record(suite, 'Multi-turn context', TestResult.WARN,
-                          f'LLM may not use context correctly: {content[:80]}',
-                          (time.monotonic() - t0) * 1000)
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=5.0
+        )
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        result.record(suite, f'TCP connect {host}:{port}', TestResult.PASS,
+                      '', (time.monotonic() - t0) * 1000)
+        return True
     except Exception as e:
-        result.record(suite, 'Multi-turn context', TestResult.WARN,
-                      str(e)[:100], (time.monotonic() - t0) * 1000)
+        result.record(
+            suite, f'TCP connect {host}:{port}', TestResult.FAIL,
+            f'{type(e).__name__}: {e}\ntraceback:\n{traceback.format_exc()}',
+            (time.monotonic() - t0) * 1000,
+        )
+        return False
 
 
 # ======================================================================

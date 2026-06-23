@@ -8,9 +8,9 @@ server:
 
 llm:
   provider: "openai"  # Options: openai, azure_openai, anthropic, gemini, groq
-  model: "MiniMax-M2.7"
+  model: ${OPENAI_MODEL_NAME:-MiniMax-M2.7}
   max_tokens: 4096
-  use_generic_client: true  # Use chat/completions only — MiniMax does not support /v1/responses
+  use_generic_client: ${USE_GENERIC_CLIENT:-true}  # Use chat/completions only
 
   providers:
     openai:
@@ -40,9 +40,9 @@ llm:
       api_url: ${GROQ_API_URL:https://api.groq.com/openai/v1}
 
 embedder:
-  provider: "openai"  # Use remote embedding service via OpenAI-compatible API
-  model: "all-MiniLM-L6-v2"
-  dimensions: 384
+  provider: ${EMBEDDER_PROVIDER:-openai}  # Use remote embedding service via OpenAI-compatible API
+  model: ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+  dimensions: ${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
 
   providers:
     openai:
@@ -68,7 +68,7 @@ embedder:
       model: "voyage-3"
 
 database:
-  provider: "postgres_age"  # Using PostgreSQL + Apache AGE for this configuration
+  provider: ${DATABASE_PROVIDER:-postgres_age}  # Using PostgreSQL + Apache AGE
 
   providers:
     postgres_age:

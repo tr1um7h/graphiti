@@ -14,8 +14,7 @@ services:
   # Graphiti REST API Server
   server:
     profiles: ["server", "all"]
-    build:
-      context: .
+    image: graphiti-server:amd64
     container_name: graphiti-server
     ports:
       - "${SERVER_PORT:-8000}:8000"
@@ -49,14 +48,12 @@ services:
       - POSTGRES_AGE_EMBEDDING_DIMENSION=${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
       # 服务配置
       - PORT=8000
-      - db_backend=postgres_age
+      - DATABASE_PROVIDER=postgres_age
 
   # Graphiti MCP Server
   mcp-server:
     profiles: ["mcp-server", "all"]
-    build:
-      context: .
-      dockerfile: mcp_server/docker/Dockerfile.standalone
+    image: graphiti-mcp-server:amd64
     container_name: graphiti-mcp-server
     extra_hosts:
       - "host.docker.internal:host-gateway"

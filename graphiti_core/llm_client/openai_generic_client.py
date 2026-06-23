@@ -150,7 +150,11 @@ class OpenAIGenericClient(LLMClient):
             request_kwargs['extra_body'] = {'reasoning_split': True}
 
             response = await self.client.chat.completions.create(**request_kwargs)
-            result = response.choices[0].message.content or ''
+            msg = response.choices[0].message
+            # Reasoning models (e.g. Qwen, DeepSeek-R1 served via vLLM) may
+            # return content=null and put output in reasoning_content.
+            # Fall back to reasoning_content when content is empty.
+            result = msg.content or getattr(msg, 'reasoning_content', '') or ''
 
             # Clean up response: strip <think> tags and markdown code blocks
             import re as _re

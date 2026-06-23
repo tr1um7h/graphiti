@@ -1,0 +1,61 @@
+# syntax=docker/dockerfile:1.9
+#
+# Graphiti 统一基础镜像
+# 同时供 server (FastAPI) 和 mcp_server 两个业务镜像使用
+#
+# 构建参数:
+#   PIP_INDEX_URL    - 内网 PyPI 镜像地址（离线构建时设置）
+#   PIP_TRUSTED_HOST - 内网镜像可信主机名
+#
+# 内网构建示例:
+#   docker buildx build --platform linux/amd64 \
+#     --build-arg PIP_INDEX_URL=http://internal-pypi/simple \
+#     --build-arg PIP_TRUSTED_HOST=internal-pypi \
+#     -f Dockerfile.base -t graphiti-base:py3.12 --load .
+
+FROM --platform=linux/amd64 python:3.12-slim
+
+# ============================================================
+# 系统依赖：所有业务镜像共用的最小集
+# ============================================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# ============================================================
+# uv 安装（统一支持 astral.sh 在线 与 PIP_INDEX_URL 离线两种模式）
+# ============================================================
+ARG PIP_INDEX_URL=
+ARG PIP_TRUSTED_HOST=
+
+RUN if [ -n "${PIP_INDEX_URL}" ]; then \
+      pip install --no-cache-dir uv \
+        ${PIP_TRUSTED_HOST:+--trusted-host ${PIP_TRUSTED_HOST}} \
+        -i ${PIP_INDEX_URL}; \
+    else \
+      curl -fsSL https://astral.sh/uv/install.sh | sh; \
+    fi
+
+# ============================================================
+# uv 统一环境变量
+# ============================================================
+ENV PATH="/root/.local/bin:${PATH}" \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=never
+
+# ============================================================
+# 非 root 用户（业务镜像按需切换）
+# ============================================================
+RUN groupadd -r app && useradd -r -d /app -g app -m app
+
+# OCI 标签
+ARG BUILD_DATE
+ARG VCS_REF
+LABEL org.opencontainers.image.title="Graphiti Base Image (Python 3.12)" \
+      org.opencontainers.image.description="Unified Python 3.12 base image for Graphiti server and mcp_server, supports offline build via PIP_INDEX_URL" \
+      org.opencontainers.image.vendor="Zep AI" \
+      org.opencontainers.image.source="https://github.com/getzep/graphiti" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}"

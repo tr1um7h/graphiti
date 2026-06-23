@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # Embedder configuration
     embedder_provider: str = Field(default='openai', description='Embedder provider: openai or sentence-transformers')
     embedding_api_url: str | None = Field(None, description='Base URL for the embedding API (e.g. http://embedding-service:8080/v1)')
-    embedding_model_name: str = Field(default='all-MiniLM-L6-v2', description='Embedding model name')
+    embedding_model: str = Field(default='all-MiniLM-L6-v2', description='Embedding model name')
 
     # Neo4j configuration (legacy)
     neo4j_uri: str | None = Field(None)
