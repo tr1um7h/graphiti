@@ -1003,7 +1003,35 @@ async def run_mcp_server():
         # Configure uvicorn logging to match our format
         configure_uvicorn_logging()
 
-        await mcp.run_streamable_http_async()
+        # Get the Starlette app and add trailing-slash route for /mcp/
+        # Some MCP clients send requests to /mcp/ (with trailing slash) but FastMCP
+        # only registers /mcp. Adding the route here avoids 307 redirects and POST->GET issues.
+        starlette_app = mcp.streamable_http_app()
+        mcp_handler = None
+        for route in starlette_app.routes:
+            if hasattr(route, 'path') and route.path == '/mcp':
+                mcp_handler = route.endpoint
+                break
+        if mcp_handler is None:
+            logger.warning('Could not find /mcp route handler — skipping /mcp/ alias')
+        else:
+            from starlette.routing import Route
+            starlette_app.routes.append(
+                Route('/mcp/', endpoint=mcp_handler, methods=['POST', 'GET'])
+            )
+            logger.info('Added /mcp/ route alias for POST requests')
+
+        # Run with uvicorn directly so we control the server lifecycle
+        import uvicorn
+        config_uvicorn = uvicorn.Config(
+            starlette_app,
+            host=mcp.settings.host,
+            port=mcp.settings.port,
+            log_level='info',
+            log_config=None,  # Use our own logging config
+        )
+        server_uvicorn = uvicorn.Server(config_uvicorn)
+        await server_uvicorn.serve()
     else:
         raise ValueError(
             f'Unsupported transport: {mcp_config.transport}. Use "sse", "stdio", or "http"'

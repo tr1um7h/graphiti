@@ -172,3 +172,14 @@ cache.db*
 .gstack/
 .codegraph/
 .qoder/
+
+# Docker image exports
+docker-images/
+*.tar
+*.tar.gz
+*.tgz
+
+# Compressed archives
+*.zip
+*.7z
+*.rar

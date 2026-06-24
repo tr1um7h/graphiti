@@ -63,6 +63,7 @@ logger = logging.getLogger(__name__)
 MAX_NODES = 30
 NODE_DEDUP_CANDIDATE_LIMIT = 15
 NODE_DEDUP_COSINE_MIN_SCORE = 0.6
+EXTRACTION_MAX_RETRIES = 3
 
 NodeSummaryFilter = Callable[[EntityNode], Awaitable[bool]]
 
@@ -246,10 +247,37 @@ async def _extract_nodes_single(
     episode: EpisodicNode,
     context: dict,
 ) -> list[ExtractedEntity]:
-    """Extract entities using a single LLM call."""
-    llm_response = await _call_extraction_llm(llm_client, episode, context)
-    response_object = ExtractedEntities(**llm_response)
-    return response_object.extracted_entities
+    """Extract entities using a single LLM call with validation retry.
+
+    Reasoning models (Qwen, DeepSeek-R1, etc.) may return empty or malformed
+    JSON when they exhaust max_tokens on reasoning. We retry up to
+    ``EXTRACTION_MAX_RETRIES`` times before giving up.
+    """
+    from pydantic import ValidationError
+
+    last_error: Exception | None = None
+    for attempt in range(EXTRACTION_MAX_RETRIES):
+        try:
+            llm_response = await _call_extraction_llm(llm_client, episode, context)
+            response_object = ExtractedEntities(**llm_response)
+            return response_object.extracted_entities
+        except (ValidationError, ValueError, KeyError, TypeError) as e:
+            last_error = e
+            logger.warning(
+                f'Entity extraction attempt {attempt + 1}/{EXTRACTION_MAX_RETRIES} '
+                f'failed for episode {episode.uuid}: {e}'
+            )
+            if attempt < EXTRACTION_MAX_RETRIES - 1:
+                import asyncio
+
+                await asyncio.sleep(1.0 * (attempt + 1))
+
+    logger.error(
+        f'Entity extraction failed after {EXTRACTION_MAX_RETRIES} attempts '
+        f'for episode {episode.uuid}: {last_error}'
+    )
+    # Return empty list instead of crashing — downstream handles empty extraction
+    return []
 
 
 async def _call_extraction_llm(
