@@ -49,6 +49,8 @@ services:
       # 服务配置
       - PORT=8000
       - DATABASE_PROVIDER=postgres_age
+      # 禁用遥测（内网环境无法访问 PostHog）
+      - GRAPHITI_TELEMETRY_ENABLED=${GRAPHITI_TELEMETRY_ENABLED:-false}
 
   # Graphiti MCP Server
   mcp-server:
@@ -74,6 +76,8 @@ services:
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.minimaxi.com/v1}
       - OPENAI_MODEL_NAME=${OPENAI_MODEL_NAME:-MiniMax-M2.7}
       - USE_GENERIC_CLIENT=${USE_GENERIC_CLIENT:-true}
+      - OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-16384}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-600}
       - GRAPHITI_TELEMETRY_ENABLED=${GRAPHITI_TELEMETRY_ENABLED:-false}
       # Embedding 配置 — 使用本地已启动的 embedding-service
       - EMBEDDING_API_URL=${EMBEDDING_API_URL:-http://host.docker.internal:8080/v1}

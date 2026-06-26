@@ -16,9 +16,11 @@ limitations under the License.
 
 import json
 import logging
+import os
 import typing
 from typing import Any, ClassVar
 
+import httpx
 import openai
 from openai import AsyncOpenAI
 from openai.types.chat import ChatCompletionMessageParam
@@ -88,7 +90,14 @@ class OpenAIGenericClient(LLMClient):
         self.max_tokens = max_tokens if max_tokens is not None else config.max_tokens
 
         if client is None:
-            self.client = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
+            # Reasoning models (e.g. MiniMax-M2.7) can take much longer than
+            # the SDK default (600s read).  Allow override via LLM_TIMEOUT env var.
+            timeout_seconds = float(os.environ.get('LLM_TIMEOUT', '600'))
+            self.client = AsyncOpenAI(
+                api_key=config.api_key,
+                base_url=config.base_url,
+                timeout=httpx.Timeout(timeout_seconds, connect=10.0),
+            )
         else:
             self.client = client
 
@@ -252,9 +261,22 @@ class OpenAIGenericClient(LLMClient):
                 except (
                     openai.APITimeoutError,
                     openai.APIConnectionError,
-                    openai.InternalServerError,
-                ):
-                    # Let OpenAI's client handle these retries
+                ) as e:
+                    # Transient network errors — retry at application level for
+                    # reasoning models that occasionally exceed server-side or
+                    # client-side timeouts.
+                    last_error = e
+                    if retry_count >= self.MAX_RETRIES:
+                        logger.error(f'Max retries ({self.MAX_RETRIES}) exceeded on timeout/connection error: {e}')
+                        span.set_status('error', str(e))
+                        span.record_exception(e)
+                        raise
+                    retry_count += 1
+                    logger.warning(
+                        f'Retrying after timeout/connection error (attempt {retry_count}/{self.MAX_RETRIES}): {e}'
+                    )
+                except openai.InternalServerError:
+                    # Let OpenAI's client handle 5xx retries
                     span.set_status('error', str(last_error))
                     raise
                 except Exception as e:

@@ -30,6 +30,7 @@ from graphiti_core.prompts.extract_nodes_and_edges import CombinedExtraction
 from graphiti_core.utils.datetime_utils import ensure_utc, utc_now
 from graphiti_core.utils.maintenance.dedup_helpers import _normalize_string_exact
 from graphiti_core.utils.maintenance.node_operations import (
+    EXTRACTION_MAX_RETRIES,
     _build_entity_types_context,
     _collapse_exact_duplicate_extracted_nodes,
 )
@@ -124,14 +125,38 @@ async def extract_nodes_and_edges(
         'edge_types': edge_types_context,
     }
 
-    # Single LLM call for combined extraction
-    llm_response = await llm_client.generate_response(
-        prompt_library.extract_nodes_and_edges.extract_message(context),
-        response_model=CombinedExtraction,
-        group_id=primary_episode.group_id,
-        prompt_name='extract_nodes_and_edges.extract_message',
-    )
-    response_object = CombinedExtraction(**llm_response)
+    # Single LLM call for combined extraction (with retry for reasoning-model robustness)
+    from pydantic import ValidationError
+
+    response_object: CombinedExtraction | None = None
+    last_error: Exception | None = None
+    for attempt in range(EXTRACTION_MAX_RETRIES):
+        try:
+            llm_response = await llm_client.generate_response(
+                prompt_library.extract_nodes_and_edges.extract_message(context),
+                response_model=CombinedExtraction,
+                group_id=primary_episode.group_id,
+                prompt_name='extract_nodes_and_edges.extract_message',
+            )
+            response_object = CombinedExtraction(**llm_response)
+            break
+        except (ValidationError, ValueError, KeyError, TypeError) as e:
+            last_error = e
+            logger.warning(
+                f'Combined extraction attempt {attempt + 1}/{EXTRACTION_MAX_RETRIES} '
+                f'failed for episode {primary_episode.uuid}: {e}'
+            )
+            if attempt < EXTRACTION_MAX_RETRIES - 1:
+                import asyncio
+
+                await asyncio.sleep(1.0 * (attempt + 1))
+
+    if response_object is None:
+        logger.error(
+            f'Combined extraction failed after {EXTRACTION_MAX_RETRIES} attempts '
+            f'for episode {primary_episode.uuid}: {last_error}'
+        )
+        return [], [], {}
 
     end = time()
     logger.debug(

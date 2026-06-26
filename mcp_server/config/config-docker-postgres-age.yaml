@@ -9,7 +9,7 @@ server:
 llm:
   provider: "openai"  # Options: openai, azure_openai, anthropic, gemini, groq
   model: ${OPENAI_MODEL_NAME:-MiniMax-M2.7}
-  max_tokens: 4096
+  max_tokens: ${OPENAI_MAX_TOKENS:-16384}  # Reasoning models need a large budget; 4096 causes empty-output failures
   use_generic_client: ${USE_GENERIC_CLIENT:-true}  # Use chat/completions only
 
   providers:
