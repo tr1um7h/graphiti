@@ -34,6 +34,7 @@ export function DocumentTable({ documents, onDelete }: DocumentTableProps) {
             <tr className="border-b bg-muted/50">
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">文件名</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">类型</th>
+              <th className="px-4 py-3 text-left font-medium text-muted-foreground">Group ID</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">状态</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">实体数</th>
               <th className="px-4 py-3 text-left font-medium text-muted-foreground">操作</th>
@@ -42,7 +43,7 @@ export function DocumentTable({ documents, onDelete }: DocumentTableProps) {
           <tbody>
             {documents.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-muted-foreground">
+                <td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">
                   暂无文档
                 </td>
               </tr>
@@ -54,6 +55,9 @@ export function DocumentTable({ documents, onDelete }: DocumentTableProps) {
                     <td className="px-4 py-3 font-medium">{doc.name}</td>
                     <td className="px-4 py-3">
                       <Badge variant={typeVariant[doc.type] || 'outline'}>{doc.type}</Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant="secondary">{doc.group_id || '-'}</Badge>
                     </td>
                     <td className="px-4 py-3">
                       <Badge variant={status.variant}>

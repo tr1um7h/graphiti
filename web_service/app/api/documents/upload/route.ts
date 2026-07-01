@@ -6,17 +6,36 @@ export async function POST(request: Request) {
   // URL import (JSON body with { url })
   if (contentType.includes('application/json')) {
     const body = await request.json();
-    const url = (body as { url?: string }).url;
+    const url = (body as { url?: string; group_id?: string }).url;
+    const groupId = (body as { group_id?: string }).group_id || 'default';
     if (!url) {
       return Response.json({ error: 'No URL provided' }, { status: 400 });
     }
     try {
-      const response = await fetchFromBackend<{ id: string; name: string; status: string; dataset: string }>({
-        path: '/rest/documents/import-url',
+      const messagesRequest = {
+        group_id: groupId,
+        messages: [
+          {
+            uuid: `doc-${Date.now()}-${url}`,
+            name: `Document: ${url}`,
+            role: 'user',
+            role_type: 'user',
+            content: url,
+            timestamp: new Date().toISOString(),
+            source_description: `Imported URL: ${url}`,
+          },
+        ],
+      };
+      await fetchFromBackend<{ message: string; success: boolean }>({
+        path: '/messages',
         method: 'POST',
-        body: JSON.stringify({ url }),
+        body: JSON.stringify(messagesRequest),
       });
-      return Response.json(response);
+      return Response.json({
+        success: true,
+        name: url,
+        group_id: groupId,
+      });
     } catch (error) {
       console.error('URL import error:', error);
       return Response.json(
@@ -29,7 +48,7 @@ export async function POST(request: Request) {
   // File upload (multipart/form-data) - 读取文件内容并调用 REST API /messages 接口
   const formData = await request.formData();
   const file = formData.get('file') as File | null;
-  const dataset = (formData.get('dataset') as string) || 'default';
+  const groupId = (formData.get('group_id') as string) || 'default';
 
   if (!file) {
     return Response.json({ error: 'No file provided' }, { status: 400 });
@@ -42,7 +61,7 @@ export async function POST(request: Request) {
 
     // 2. 构造消息请求体
     const messagesRequest = {
-      group_id: dataset,
+      group_id: groupId,
       messages: [
         {
           uuid: `doc-${Date.now()}-${fileName}`,
@@ -57,7 +76,7 @@ export async function POST(request: Request) {
     };
 
     // 3. 调用 REST API /messages 接口
-    const response = await fetchFromBackend<{ message: string; success: boolean }>({
+    await fetchFromBackend<{ message: string; success: boolean }>({
       path: '/messages',
       method: 'POST',
       body: JSON.stringify(messagesRequest),
@@ -67,7 +86,7 @@ export async function POST(request: Request) {
       success: true,
       message: `File '${fileName}' uploaded and queued for processing`,
       document_id: messagesRequest.messages[0].uuid,
-      dataset: dataset,
+      group_id: groupId,
     });
   } catch (error) {
     console.error('Upload error:', error);

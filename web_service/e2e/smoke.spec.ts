@@ -95,7 +95,7 @@ test.describe('API tests', () => {
           mimeType: 'application/pdf',
           buffer,
         },
-        dataset: 'test',
+        group_id: 'test',
       },
     });
 

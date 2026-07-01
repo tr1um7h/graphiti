@@ -15,6 +15,12 @@ const POLL_INTERVAL_MS = 2000;
 // entity extraction) can take much longer. The old 60s window was too tight.
 const POLL_TIMEOUT_MS = 120_000;
 
+interface GroupOption {
+  id: string;
+  name: string;
+  count: number;
+}
+
 function inferDocType(filename: string): string {
   const lower = filename.toLowerCase();
   if (lower.endsWith('.pdf')) return 'PDF';
@@ -30,10 +36,11 @@ function isPlaceholder(doc: Document): boolean {
 
 export default function DocumentsPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [groups, setGroups] = useState<GroupOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<DocumentStatus | 'all'>('all');
-  const [dataset, setDataset] = useState('all');
+  const [groupId, setGroupId] = useState('all');
   const [uploadOpen, setUploadOpen] = useState(false);
 
   // Refs hold the polling task out of React's render/effect lifecycle so that
@@ -54,6 +61,16 @@ export default function DocumentsPage() {
     };
   }, []);
 
+  const fetchGroups = useCallback(async (): Promise<GroupOption[]> => {
+    try {
+      const res = await fetch('/api/graph/groups', { cache: 'no-store' });
+      if (!res.ok) return [];
+      return (await res.json()) as GroupOption[];
+    } catch {
+      return [];
+    }
+  }, []);
+
   const fetchDocuments = useCallback(async (): Promise<Document[]> => {
     const res = await fetch('/api/documents', { cache: 'no-store' });
     if (!res.ok) throw new Error('Failed to fetch');
@@ -62,11 +79,14 @@ export default function DocumentsPage() {
 
   // Initial load
   useEffect(() => {
-    fetchDocuments()
-      .then(setDocuments)
+    Promise.all([fetchDocuments(), fetchGroups()])
+      .then(([docs, grps]) => {
+        setDocuments(docs);
+        setGroups(grps);
+      })
       .catch((err) => console.error('Failed to fetch documents:', err))
       .finally(() => setLoading(false));
-  }, [fetchDocuments]);
+  }, [fetchDocuments, fetchGroups]);
 
   // Poll the list until the uploaded document appears (or the timeout expires).
   // Runs to completion: not cancellable by dialog/UI state, only by unmount.
@@ -93,6 +113,9 @@ export default function DocumentsPage() {
             return [...visible, ...waitingPlaceholders];
           });
 
+          // Refresh groups in case a new group was created by the upload
+          fetchGroups().then(setGroups).catch(() => {});
+
           if (fetched.some((d) => d.name === name)) {
             pollingNamesRef.current.delete(name);
             return; // success
@@ -111,12 +134,12 @@ export default function DocumentsPage() {
         ),
       );
     },
-    [fetchDocuments],
+    [fetchDocuments, fetchGroups],
   );
 
   // Called by UploadDialog the moment an upload request succeeds.
   const handleUploaded = useCallback(
-    (name: string) => {
+    (name: string, gid: string) => {
       // Optimistic placeholder: the processing task is now in flight and cannot
       // be cancelled — show it immediately rather than an empty refresh.
       setDocuments((prev) => {
@@ -128,13 +151,17 @@ export default function DocumentsPage() {
           status: 'processing',
           entityCount: 0,
           createdAt: new Date().toISOString(),
-          dataset: 'default',
+          group_id: gid || 'default',
         };
         return [placeholder, ...prev];
       });
+      // Auto-switch filter so the uploaded doc is visible
+      if (groupId !== 'all' && groupId !== gid) {
+        setGroupId('all');
+      }
       void pollForDocument(name);
     },
-    [pollForDocument],
+    [pollForDocument, groupId],
   );
 
   // Delete a document. Completed docs are removed from the graph; failed
@@ -175,7 +202,7 @@ export default function DocumentsPage() {
 
   const filteredDocuments = documents.filter((doc) => {
     if (statusFilter !== 'all' && doc.status !== statusFilter) return false;
-    if (dataset !== 'all' && doc.dataset !== dataset) return false;
+    if (groupId !== 'all' && doc.group_id !== groupId) return false;
     if (search && !doc.name.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
@@ -205,13 +232,17 @@ export default function DocumentsPage() {
       {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-3">
         <select
-          value={dataset}
-          onChange={(e) => setDataset(e.target.value)}
+          value={groupId}
+          onChange={(e) => setGroupId(e.target.value)}
           className="h-8 rounded-md border bg-background px-3 text-sm"
         >
-          <option value="all">All Datasets</option>
-          <option value="default">Default</option>
-          <option value="research">Research</option>
+          <option value="all">All Groups</option>
+          <option value="default">default</option>
+          {groups.map((g) => (
+            <option key={g.id || g.name} value={g.id || g.name}>
+              {g.id || g.name} ({g.count})
+            </option>
+          ))}
         </select>
 
         <div className="relative flex-1 min-w-[200px] max-w-sm">
@@ -249,6 +280,7 @@ export default function DocumentsPage() {
       <UploadDialog
         open={uploadOpen}
         onOpenChange={setUploadOpen}
+        groups={groups}
         onUploaded={handleUploaded}
       />
     </div>

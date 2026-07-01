@@ -9,18 +9,30 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Upload, Link } from 'lucide-react';
 
+interface GroupOption {
+  id: string;
+  name: string;
+  count: number;
+}
+
 interface UploadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** 可用 group 列表，用于下拉选择 */
+  groups?: GroupOption[];
   /** Fired the moment an upload/import request succeeds; the page uses it to
    *  add an optimistic placeholder and start polling until the doc lands. */
-  onUploaded?: (name: string) => void;
+  onUploaded?: (name: string, groupId: string) => void;
 }
 
-export function UploadDialog({ open, onOpenChange, onUploaded }: UploadDialogProps) {
+export function UploadDialog({ open, onOpenChange, groups, onUploaded }: UploadDialogProps) {
   const [url, setUrl] = useState('');
+  const [groupId, setGroupId] = useState('default');
+  const [customGroupId, setCustomGroupId] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<string | null>(null);
+
+  const effectiveGroupId = groupId === '__custom__' ? customGroupId.trim() || 'default' : groupId;
 
   const onDrop = useCallback(
     async (acceptedFiles: File[]) => {
@@ -31,15 +43,16 @@ export function UploadDialog({ open, onOpenChange, onUploaded }: UploadDialogPro
         for (const file of acceptedFiles) {
           const formData = new FormData();
           formData.append('file', file);
+          formData.append('group_id', effectiveGroupId);
           const res = await fetch('/api/documents/upload', { method: 'POST', body: formData });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ error: 'Upload failed' }));
             throw new Error(err.error || 'Upload failed');
           }
-          const result = await res.json();
-          setUploadResult(`✓ ${result.name} uploaded successfully`);
+          await res.json();
+          setUploadResult(`✓ ${file.name} uploaded to group "${effectiveGroupId}"`);
           // Hand off to the page: it shows the in-flight task and polls until committed.
-          onUploaded?.(file.name);
+          onUploaded?.(file.name, effectiveGroupId);
         }
       } catch (error) {
         setUploadResult(`✗ Upload failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -47,7 +60,7 @@ export function UploadDialog({ open, onOpenChange, onUploaded }: UploadDialogPro
         setUploading(false);
       }
     },
-    [onUploaded],
+    [effectiveGroupId, onUploaded],
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
@@ -69,16 +82,17 @@ export function UploadDialog({ open, onOpenChange, onUploaded }: UploadDialogPro
       const res = await fetch('/api/documents/upload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, group_id: effectiveGroupId }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Import failed' }));
         throw new Error(err.error || 'Import failed');
       }
       const result = await res.json();
-      setUploadResult(`✓ ${result.name} imported successfully`);
+      const importedName = result.name || url;
+      setUploadResult(`✓ ${importedName} imported to group "${effectiveGroupId}"`);
       setUrl('');
-      onUploaded?.(result.name);
+      onUploaded?.(importedName, effectiveGroupId);
     } catch (error) {
       setUploadResult(`✗ Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
@@ -97,6 +111,37 @@ export function UploadDialog({ open, onOpenChange, onUploaded }: UploadDialogPro
         <DialogHeader>
           <DialogTitle>Upload Files</DialogTitle>
         </DialogHeader>
+
+        {/* Group ID selector */}
+        <div className="space-y-2">
+          <Label htmlFor="group-id">Group ID</Label>
+          <div className="flex gap-2">
+            <select
+              id="group-id"
+              value={groupId}
+              onChange={(e) => setGroupId(e.target.value)}
+              disabled={uploading}
+              className="h-9 flex-1 rounded-md border bg-background px-3 text-sm"
+            >
+              <option value="default">default</option>
+              {groups?.map((g) => (
+                <option key={g.id || g.name} value={g.id || g.name}>
+                  {g.id || g.name} ({g.count})
+                </option>
+              ))}
+              <option value="__custom__">自定义...</option>
+            </select>
+            {groupId === '__custom__' && (
+              <Input
+                placeholder="输入 group_id"
+                value={customGroupId}
+                onChange={(e) => setCustomGroupId(e.target.value)}
+                disabled={uploading}
+                className="flex-1"
+              />
+            )}
+          </div>
+        </div>
 
         {/* Drag and drop area */}
         <div
@@ -123,12 +168,6 @@ export function UploadDialog({ open, onOpenChange, onUploaded }: UploadDialogPro
             {uploadResult}
           </p>
         )}
-
-        {/* Dataset selector placeholder */}
-        <div className="space-y-2">
-          <Label htmlFor="dataset">Target Dataset</Label>
-          <Input id="dataset" value="Default Dataset" disabled />
-        </div>
 
         {/* URL import */}
         <div className="space-y-2">
