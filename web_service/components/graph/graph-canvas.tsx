@@ -141,7 +141,15 @@ export function GraphCanvas({
     if (!graph || !sigmaRef.current) return;
     applyLayout(graph, layoutAlgorithm);
     sigmaRef.current.refresh();
+    // Reset camera to center the graph after layout change
+    sigmaRef.current.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
   }, [layoutAlgorithm, graph]);
+
+  // Auto-center camera after initial graph load
+  useEffect(() => {
+    if (!graph || !sigmaRef.current) return;
+    sigmaRef.current.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
+  }, [graph]);
 
   if (loading) {
     return (
