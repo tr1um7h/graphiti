@@ -183,3 +183,9 @@ docker-images/
 *.zip
 *.7z
 *.rar
+
+# Web Service (Next.js)
+web_service/.next/
+web_service/node_modules/
+web_service/.env.local
+web_service/test-results/

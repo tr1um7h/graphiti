@@ -670,6 +670,46 @@ We encourage and appreciate all forms of contributions, whether it's code, docum
 answering questions in the Graphiti Discord channel. For detailed guidelines on code contributions, please refer
 to [CONTRIBUTING](CONTRIBUTING.md).
 
+## Web UI Service
+
+Graphiti provides a Next.js-based Web UI for visualizing and interacting with knowledge graphs.
+
+### Starting the Web UI
+
+```bash
+# Start all services (including Web UI)
+docker compose --profile all up -d
+
+# Start only Web UI (requires backend services running)
+docker compose --profile web-service up -d
+```
+
+### Access URLs
+
+- Web UI: http://localhost:3000
+- Server API: http://localhost:8000
+- MCP Server: http://localhost:8001
+
+### Configuration
+
+The Web service uses an independent environment variable file `web_service/.env`. Copy the example file:
+
+```bash
+cp web_service/.env.example web_service/.env
+```
+
+### Building Docker Image
+
+For offline/intranet deployment, build and export the Web service image:
+
+```bash
+# Build the amd64 image
+docker buildx build --platform linux/amd64 -t graphiti-web-service:amd64 ./web_service/
+
+# Or use the export script
+./scripts/export-web-service.sh
+```
+
 ## Support
 
 Join the [Zep Discord server](https://discord.com/invite/W8Kw6bsgXQ) and make your way to the **#Graphiti** channel!
