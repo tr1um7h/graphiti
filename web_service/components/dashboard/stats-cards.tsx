@@ -1,35 +1,34 @@
 'use client';
 
 import Link from 'next/link';
-import { Network, ArrowLeftRight, FileText, MessageSquare } from 'lucide-react';
+import { Network, ArrowLeftRight, FileText, Layers } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
-
-interface StatCard {
-  label: string;
-  value: number;
-  todayNew: number;
-  icon: React.ReactNode;
-  href: string;
-}
 
 interface StatsCardsProps {
   stats: {
     totalNodes: number;
     totalEdges: number;
     totalDocuments: number;
-    totalConversations: number;
+    totalGroups: number;
     todayNewNodes: number;
     todayNewEdges: number;
     todayNewDocuments: number;
-    todayNewConversations: number;
   };
 }
 
-const cards: (Omit<StatCard, 'value' | 'todayNew'> & { key: string })[] = [
-  { key: 'nodes', label: '实体', icon: <Network className="h-5 w-5 text-blue-500" />, href: '/graph' },
-  { key: 'edges', label: '关系', icon: <ArrowLeftRight className="h-5 w-5 text-green-500" />, href: '/graph' },
-  { key: 'documents', label: '文档', icon: <FileText className="h-5 w-5 text-orange-500" />, href: '/documents' },
-  { key: 'conversations', label: '对话轮', icon: <MessageSquare className="h-5 w-5 text-purple-500" />, href: '/' },
+interface CardConfig {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+  href: string;
+  hasTodayNew: boolean;
+}
+
+const cards: CardConfig[] = [
+  { key: 'nodes', label: '实体', icon: <Network className="h-5 w-5 text-blue-500" />, href: '/graph', hasTodayNew: true },
+  { key: 'edges', label: '关系', icon: <ArrowLeftRight className="h-5 w-5 text-green-500" />, href: '/graph', hasTodayNew: true },
+  { key: 'documents', label: '文档', icon: <FileText className="h-5 w-5 text-orange-500" />, href: '/documents', hasTodayNew: true },
+  { key: 'groups', label: '分组', icon: <Layers className="h-5 w-5 text-purple-500" />, href: '/documents', hasTodayNew: false },
 ];
 
 export function StatsCards({ stats }: StatsCardsProps) {
@@ -37,7 +36,7 @@ export function StatsCards({ stats }: StatsCardsProps) {
     nodes: { value: stats.totalNodes, todayNew: stats.todayNewNodes },
     edges: { value: stats.totalEdges, todayNew: stats.todayNewEdges },
     documents: { value: stats.totalDocuments, todayNew: stats.todayNewDocuments },
-    conversations: { value: stats.totalConversations, todayNew: stats.todayNewConversations },
+    groups: { value: stats.totalGroups, todayNew: 0 },
   };
 
   return (
@@ -54,9 +53,11 @@ export function StatsCards({ stats }: StatsCardsProps) {
                   {values[card.key].value.toLocaleString()}
                 </div>
                 <div className="text-sm text-muted-foreground">{card.label}</div>
-                <div className="text-xs text-emerald-600">
-                  +{values[card.key].todayNew} 今日
-                </div>
+                {card.hasTodayNew && (
+                  <div className="text-xs text-emerald-600">
+                    +{values[card.key].todayNew} 今日
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
