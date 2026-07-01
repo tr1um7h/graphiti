@@ -6,7 +6,6 @@ import { Badge } from '@/components/ui/badge';
 const routeTitles: Record<string, string> = {
   '/': 'Overview',
   '/graph': 'Graph',
-  '/explore': 'Explore',
   '/documents': 'Documents',
   '/settings': 'Settings',
 };

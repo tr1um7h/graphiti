@@ -130,25 +130,6 @@ test.describe('UI page tests', () => {
     expect(filtered).toHaveLength(0);
   });
 
-  test('Explore page loads without errors', async ({ page }) => {
-    const errors: string[] = [];
-    collectErrors(page, errors);
-
-    await page.goto(`${BASE}/explore`, { waitUntil: 'networkidle', timeout: 15000 });
-    await page.waitForTimeout(4000);
-
-    // Page should render without crashing
-    const bodyText = await page.textContent('body');
-    // Should not show the mock "张三" default
-    expect(bodyText).not.toContain('node-0');
-
-    const filtered = realErrors(errors);
-    if (filtered.length > 0) {
-      console.log('EXPLORE PAGE ERRORS:', filtered);
-    }
-    expect(filtered).toHaveLength(0);
-  });
-
   test('Dashboard page loads', async ({ page }) => {
     const errors: string[] = [];
     collectErrors(page, errors);

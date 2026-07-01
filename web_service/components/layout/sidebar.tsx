@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation';
 import {
   BarChart3,
   Network,
-  Compass,
   FolderOpen,
   Menu,
 } from 'lucide-react';
@@ -29,11 +28,6 @@ const navItems: NavItem[] = [
     label: 'Graph',
     href: '/graph',
     icon: <Network className="h-4 w-4" />,
-  },
-  {
-    label: 'Explore',
-    href: '/explore',
-    icon: <Compass className="h-4 w-4" />,
   },
   {
     label: 'Documents',

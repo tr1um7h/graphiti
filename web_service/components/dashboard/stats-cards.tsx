@@ -29,7 +29,7 @@ const cards: (Omit<StatCard, 'value' | 'todayNew'> & { key: string })[] = [
   { key: 'nodes', label: '实体', icon: <Network className="h-5 w-5 text-blue-500" />, href: '/graph' },
   { key: 'edges', label: '关系', icon: <ArrowLeftRight className="h-5 w-5 text-green-500" />, href: '/graph' },
   { key: 'documents', label: '文档', icon: <FileText className="h-5 w-5 text-orange-500" />, href: '/documents' },
-  { key: 'conversations', label: '对话轮', icon: <MessageSquare className="h-5 w-5 text-purple-500" />, href: '/explore' },
+  { key: 'conversations', label: '对话轮', icon: <MessageSquare className="h-5 w-5 text-purple-500" />, href: '/' },
 ];
 
 export function StatsCards({ stats }: StatsCardsProps) {
