@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import Sigma from 'sigma';
 import { useGraphStore } from '@/stores/graph-store';
 import type { GraphApiResponse } from '@/lib/types';
+import { applyLayout } from '@/lib/graph-layouts';
 
 interface GraphCanvasProps {
   className?: string;
@@ -22,10 +23,9 @@ export function GraphCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
 
-  // Only subscribe to `graph` — NOT centerNode or hoveredNode.
-  // This ensures the component only re-renders when the graph data
-  // actually changes (group switch, search focus, reset focus).
+  // Subscribe to graph data AND layout algorithm
   const graph = useGraphStore((s) => s.graph);
+  const layoutAlgorithm = useGraphStore((s) => s.layoutAlgorithm);
   const [loading, setLoading] = useState(true);
 
   // Keep the latest callbacks in refs so the Sigma init effect
@@ -70,6 +70,10 @@ export function GraphCanvas({
       sigmaRef.current.kill();
       sigmaRef.current = null;
     }
+
+    // Apply initial layout before rendering
+    const currentLayout = useGraphStore.getState().layoutAlgorithm;
+    applyLayout(graph, currentLayout);
 
     const sigma = new Sigma(graph, containerRef.current, {
       renderEdgeLabels: graph.order < 2000,
@@ -131,6 +135,13 @@ export function GraphCanvas({
       sigmaRef.current = null;
     };
   }, [graph]); // <-- only depends on graph
+
+  // Re-apply layout when layoutAlgorithm changes (without recreating Sigma)
+  useEffect(() => {
+    if (!graph || !sigmaRef.current) return;
+    applyLayout(graph, layoutAlgorithm);
+    sigmaRef.current.refresh();
+  }, [layoutAlgorithm, graph]);
 
   if (loading) {
     return (

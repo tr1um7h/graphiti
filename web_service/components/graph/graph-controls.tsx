@@ -37,11 +37,7 @@ export function GraphControls() {
           className="inline-flex items-center gap-1 rounded-md border px-3 py-1.5 text-sm hover:bg-accent"
         >
           <LayoutGrid className="h-4 w-4" />
-          {layoutAlgorithm === 'forceatlas2'
-            ? 'ForceAtlas2'
-            : layoutAlgorithm === 'circular'
-              ? 'Circular'
-              : 'Hierarchical'}
+          {layoutAlgorithm === 'forceatlas2' ? 'ForceAtlas2' : 'Circular'}
         </DropdownMenuTrigger>
         <DropdownMenuContent>
           <DropdownMenuItem onClick={() => setLayoutAlgorithm('forceatlas2')}>
@@ -49,9 +45,6 @@ export function GraphControls() {
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setLayoutAlgorithm('circular')}>
             Circular
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setLayoutAlgorithm('hierarchical')}>
-            Hierarchical
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

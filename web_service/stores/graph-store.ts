@@ -17,7 +17,7 @@ interface GraphState {
   centerNode: string | null;
   hoveredNode: string | null;
   hiddenTypes: Set<string>;
-  layoutAlgorithm: 'forceatlas2' | 'circular' | 'hierarchical';
+  layoutAlgorithm: 'forceatlas2' | 'circular';
   isLayoutRunning: boolean;
   nodeCount: number;
   edgeCount: number;
