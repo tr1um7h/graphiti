@@ -88,11 +88,12 @@ export default function DocumentsPage() {
       .finally(() => setLoading(false));
   }, [fetchDocuments, fetchGroups]);
 
-  // Poll the list until the uploaded document appears (or the timeout expires).
-  // Runs to completion: not cancellable by dialog/UI state, only by unmount.
+  // Poll the list until the uploaded document transitions from pending to completed.
+  // The backend /queue/status endpoint now provides real pending state, so
+  // polling just refreshes the list until the doc shows as 'completed'.
   const pollForDocument = useCallback(
     async (name: string) => {
-      if (pollingNamesRef.current.has(name)) return; // already polling this name
+      if (pollingNamesRef.current.has(name)) return;
       pollingNamesRef.current.add(name);
 
       const deadline = Date.now() + POLL_TIMEOUT_MS;
@@ -103,34 +104,28 @@ export default function DocumentsPage() {
 
         try {
           const fetched = await fetchDocuments();
-          setDocuments((prev) => {
-            // Drop placeholders whose real document has landed; keep the rest.
-            const waitingPlaceholders = prev.filter(
-              (d) => isPlaceholder(d) && !fetched.some((f) => f.name === d.name),
-            );
-            // Exclude any docs whose deletion is in flight.
-            const visible = fetched.filter((f) => !deletedIdsRef.current.has(f.id));
-            return [...visible, ...waitingPlaceholders];
-          });
-
-          // Refresh groups in case a new group was created by the upload
+          setDocuments(fetched.filter((f) => !deletedIdsRef.current.has(f.id)));
           fetchGroups().then(setGroups).catch(() => {});
 
-          if (fetched.some((d) => d.name === name)) {
+          // Done when the doc exists AND is no longer pending/processing
+          const doc = fetched.find((d) => d.name === name);
+          if (doc && doc.status !== 'pending' && doc.status !== 'processing') {
             pollingNamesRef.current.delete(name);
-            return; // success
+            return;
           }
         } catch (err) {
           console.error('Poll fetch failed:', err);
         }
       }
 
-      // Timed out — surface it on the placeholder so the user isn't left guessing.
       if (!mountedRef.current) return;
       pollingNamesRef.current.delete(name);
+      // Mark as failed if still pending after timeout
       setDocuments((prev) =>
         prev.map((d) =>
-          d.id === `pending-${name}` ? { ...d, status: 'failed' as DocumentStatus } : d,
+          d.name === name && (d.status === 'pending' || d.status === 'processing')
+            ? { ...d, status: 'failed' as DocumentStatus }
+            : d,
         ),
       );
     },
@@ -140,20 +135,9 @@ export default function DocumentsPage() {
   // Called by UploadDialog the moment an upload request succeeds.
   const handleUploaded = useCallback(
     (name: string, gid: string) => {
-      // Optimistic placeholder: the processing task is now in flight and cannot
-      // be cancelled — show it immediately rather than an empty refresh.
-      setDocuments((prev) => {
-        if (prev.some((d) => d.name === name)) return prev;
-        const placeholder: Document = {
-          id: `pending-${placeholderSeqRef.current++}`,
-          name,
-          type: inferDocType(name),
-          status: 'processing',
-          entityCount: 0,
-          createdAt: new Date().toISOString(),
-          group_id: gid || 'default',
-        };
-        return [placeholder, ...prev];
+      // Refresh immediately — backend /queue/status now returns the pending job
+      fetchDocuments().then((fetched) => {
+        setDocuments(fetched.filter((f) => !deletedIdsRef.current.has(f.id)));
       });
       // Auto-switch filter so the uploaded doc is visible
       if (groupId !== 'all' && groupId !== gid) {
@@ -161,7 +145,7 @@ export default function DocumentsPage() {
       }
       void pollForDocument(name);
     },
-    [pollForDocument, groupId],
+    [pollForDocument, groupId, fetchDocuments],
   );
 
   // Delete a document. Completed docs are removed from the graph; failed

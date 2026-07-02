@@ -27,7 +27,7 @@ from typing_extensions import LiteralString
 from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.cross_encoder.openai_reranker_client import OpenAIRerankerClient
 from graphiti_core.decorators import handle_multiple_group_ids
-from graphiti_core.driver.driver import GraphDriver
+from graphiti_core.driver.driver import GraphDriver, GraphProvider
 from graphiti_core.edges import (
     CommunityEdge,
     Edge,
@@ -1805,11 +1805,23 @@ class Graphiti:
         # We should delete all nodes that are only mentioned in the deleted episode
         nodes_to_delete: list[EntityNode] = []
         for node in nodes:
-            query: LiteralString = 'MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) RETURN count(*) AS episode_count'
-            records, _, _ = await self.driver.execute_query(query, uuid=node.uuid, routing_='r')
+            if self.driver.provider == GraphProvider.POSTGRES_AGE:
+                query: LiteralString = (
+                    'SELECT count(*) AS episode_count '
+                    'FROM episodic_edges WHERE target_node_uuid = %(uuid)s'
+                )
+                records, _, _ = await self.driver.execute_query(
+                    query, params={'uuid': node.uuid}, routing_='r'
+                )
+            else:
+                query = (
+                    'MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) '
+                    'RETURN count(*) AS episode_count'
+                )
+                records, _, _ = await self.driver.execute_query(query, uuid=node.uuid, routing_='r')
 
             for record in records:
-                if record['episode_count'] == 1:
+                if int(record['episode_count']) == 1:
                     nodes_to_delete.append(node)
 
         await Edge.delete_by_uuids(self.driver, [edge.uuid for edge in edges_to_delete])

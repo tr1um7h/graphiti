@@ -13,27 +13,50 @@ class DatabaseProvider(str, Enum):
 
 
 class Settings(BaseSettings):
-    # OpenAI-compatible LLM configuration (supports MiniMax and any OpenAI API compatible provider)
+    """Graphiti Server configuration.
+
+    Environment variables mirror the MCP server's config schema so that both
+    services share identical configuration semantics.
+    """
+
+    # --- LLM configuration (OpenAI-compatible) ---------------------------
     openai_api_key: str | None = Field(None)
     openai_base_url: str | None = Field(None)
     openai_model_name: str | None = Field(None)
-    use_generic_client: bool = Field(default=False, description='Use OpenAIGenericClient for providers without /v1/responses (e.g. MiniMax)')
+    use_generic_client: bool = Field(
+        default=False,
+        description='Use OpenAIGenericClient for providers without /v1/responses (e.g. MiniMax)',
+    )
+    openai_max_tokens: int = Field(default=16384, description='Max tokens for LLM responses')
+    llm_timeout: int = Field(default=600, description='LLM request timeout in seconds')
 
-    # Embedder configuration
-    embedder_provider: str = Field(default='openai', description='Embedder provider: openai or sentence-transformers')
-    embedding_api_url: str | None = Field(None, description='Base URL for the embedding API (e.g. http://embedding-service:8080/v1)')
-    embedding_model: str = Field(default='all-MiniLM-L6-v2', description='Embedding model name')
+    # --- Embedder configuration ------------------------------------------
+    embedder_provider: str = Field(default='openai')
+    embedding_api_url: str | None = Field(
+        default=None,
+        description='Base URL for the embedding API (e.g. http://localhost:8080/v1)',
+    )
+    embedding_model: str = Field(default='all-MiniLM-L6-v2')
 
-    # Neo4j configuration (legacy)
+    # --- PostgreSQL AGE configuration -------------------------------------
+    database_provider: DatabaseProvider = Field(default=DatabaseProvider.POSTGRES_AGE)
+    postgres_age_dsn: str = Field(
+        default='postgresql://graphiti:graphiti@localhost:55432/graphiti',
+        description='PostgreSQL AGE connection DSN',
+    )
+    postgres_age_graph_name: str = Field(default='graphiti')
+    postgres_age_embedding_dimension: int = Field(default=384)
+
+    # --- Neo4j configuration (legacy fallback) ----------------------------
     neo4j_uri: str | None = Field(None)
     neo4j_user: str | None = Field(None)
     neo4j_password: str | None = Field(None)
 
-    # Postgres AGE configuration (alternative to Neo4j)
-    database_provider: DatabaseProvider = Field(default=DatabaseProvider.POSTGRES_AGE)
-    postgres_age_dsn: str | None = Field(default=None)
-    postgres_age_graph_name: str | None = Field(default=None)
-    postgres_age_embedding_dimension: int = Field(default=384)
+    # --- Telemetry --------------------------------------------------------
+    graphiti_telemetry_enabled: bool = Field(default=False)
+
+    # --- Server -----------------------------------------------------------
+    port: int = Field(default=8000, description='Server listen port')
 
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 

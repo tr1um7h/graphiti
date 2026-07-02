@@ -624,10 +624,8 @@ async def delete_episode(uuid: str) -> SuccessResponse | ErrorResponse:
     try:
         client = await graphiti_service.get_client()
 
-        # Get the episodic node by UUID
-        episodic_node = await EpisodicNode.get_by_uuid(client.driver, uuid)
-        # Delete the node using its delete method
-        await episodic_node.delete(client.driver)
+        # Use remove_episode for cascade deletion of associated entity nodes and edges
+        await client.remove_episode(uuid)
         return SuccessResponse(message=f'Episode with UUID {uuid} deleted successfully')
     except Exception as e:
         error_msg = str(e)

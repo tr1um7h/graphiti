@@ -16,6 +16,7 @@ limitations under the License.
 
 from collections.abc import Iterable
 
+import httpx
 from openai import AsyncAzureOpenAI, AsyncOpenAI
 from openai.types import EmbeddingModel
 
@@ -49,7 +50,13 @@ class OpenAIEmbedder(EmbedderClient):
         if client is not None:
             self.client = client
         else:
-            self.client = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
+            # Use a generous timeout and disable env-based proxy for local/self-hosted services
+            http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(120.0, connect=10.0), trust_env=False
+            )
+            self.client = AsyncOpenAI(
+                api_key=config.api_key, base_url=config.base_url, http_client=http_client
+            )
 
     async def create(
         self, input_data: str | list[str] | Iterable[int] | Iterable[Iterable[int]]
