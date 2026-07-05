@@ -105,8 +105,28 @@ async def handle_command(args):
         if args.html_output:
             print(f'HTML report not yet implemented: {args.html_output}')
     elif args.command == 'apply':
-        print('Apply command not yet implemented')
-        sys.exit(1)
+        from cli.apply import apply_patch
+        from graphiti_core.driver.postgres_age.driver import PostgresAgeDriver
+
+        driver = PostgresAgeDriver(dsn=args.dsn, schema=args.schema)
+        try:
+            result = await apply_patch(
+                driver,
+                json.loads(Path(args.patch_file).read_text(encoding='utf-8')),
+                args.from_group_id,
+                args.to_group_id,
+                strategy=args.strategy,
+                dry_run=args.dry_run,
+            )
+            print(
+                f'Applied: {result["added"]} added, '
+                f'{result["removed"]} removed, '
+                f'{result["modified"]} modified'
+            )
+            if result['conflicts'] > 0:
+                print(f'Conflicts: {result["conflicts"]}')
+        finally:
+            await driver.close()
 
 
 if __name__ == '__main__':
