@@ -14,7 +14,12 @@ dependencies = [
     "uvicorn>=0.44.0",
     "httpx>=0.28.1",
     "neo4j>=5.26.0",
+    "python-multipart>=0.0.32",
 ]
+
+[tool.uv.sources]
+# Use local graphiti-core for development
+graphiti-core = { path = "..", editable = true }
 
 [project.optional-dependencies]
 dev = [
@@ -36,7 +41,8 @@ build-backend = "hatchling.build"
 packages = ["graph_service"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
+pythonpath = [".", ".."]
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100
