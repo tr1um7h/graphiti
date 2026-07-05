@@ -28,6 +28,9 @@ packages = ["graphiti_core"]
 Homepage = "https://help.getzep.com/graphiti/graphiti/overview"
 Repository = "https://github.com/getzep/graphiti"
 
+[project.scripts]
+graphiti-cli = "cli.main:main"
+
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.49.0"]
 groq = ["groq>=0.2.0"]
