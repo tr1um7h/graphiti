@@ -10,13 +10,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, Mock
 
-import pytest
-
-from cli.apply import apply_patch, get_cascade_deletes
+from cli.apply import apply_patch
 from cli.diff import diff_groups
-from cli.export import export_group_with_sorting
-from cli.import_ import import_group
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -93,7 +88,9 @@ def _make_export_dir(tmp_path: Path, name: str, tables: dict[str, list[dict]]) -
         'schema_version': 1,
         'counts': {t: len(tables.get(t, [])) for t in ALL_TABLES},
     }
-    (export_dir / 'metadata.json').write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
+    (export_dir / 'metadata.json').write_text(
+        json.dumps(metadata, indent=2) + '\n', encoding='utf-8'
+    )
     for table_name in ALL_TABLES:
         _write_jsonl(export_dir / f'{table_name}.jsonl', tables.get(table_name, []))
     return export_dir
@@ -111,51 +108,127 @@ class TestE2EFullPipeline:
         """Full pipeline: export group_a, export group_b, diff, apply patch."""
         # --- Phase 1: Simulate two group exports ---
         entity_a = [
-            {'uuid': 'ua1', 'group_id': 'group_a', 'name': 'Alice', 'labels': ['Person'],
-             'summary': 'Engineer', 'created_at': '2025-01-01T00:00:00'},
-            {'uuid': 'ua2', 'group_id': 'group_a', 'name': 'Bob', 'labels': ['Person'],
-             'summary': 'Designer', 'created_at': '2025-01-01T00:00:00'},
-            {'uuid': 'ua3', 'group_id': 'group_a', 'name': 'Dave', 'labels': ['Person'],
-             'summary': 'Removed person', 'created_at': '2025-01-01T00:00:00'},
+            {
+                'uuid': 'ua1',
+                'group_id': 'group_a',
+                'name': 'Alice',
+                'labels': ['Person'],
+                'summary': 'Engineer',
+                'created_at': '2025-01-01T00:00:00',
+            },
+            {
+                'uuid': 'ua2',
+                'group_id': 'group_a',
+                'name': 'Bob',
+                'labels': ['Person'],
+                'summary': 'Designer',
+                'created_at': '2025-01-01T00:00:00',
+            },
+            {
+                'uuid': 'ua3',
+                'group_id': 'group_a',
+                'name': 'Dave',
+                'labels': ['Person'],
+                'summary': 'Removed person',
+                'created_at': '2025-01-01T00:00:00',
+            },
         ]
         edge_a = [
-            {'uuid': 'ea1', 'group_id': 'group_a',
-             'source_node_uuid': 'ua1', 'target_node_uuid': 'ua2',
-             'name': 'KNOWS', 'fact': 'Alice knows Bob',
-             'fact_embedding': None, 'episodes': [], 'expired_at': None,
-             'valid_at': None, 'invalid_at': None, 'reference_time': None,
-             'attributes': {}, 'created_at': '2025-01-01T00:00:00'},
+            {
+                'uuid': 'ea1',
+                'group_id': 'group_a',
+                'source_node_uuid': 'ua1',
+                'target_node_uuid': 'ua2',
+                'name': 'KNOWS',
+                'fact': 'Alice knows Bob',
+                'fact_embedding': None,
+                'episodes': [],
+                'expired_at': None,
+                'valid_at': None,
+                'invalid_at': None,
+                'reference_time': None,
+                'attributes': {},
+                'created_at': '2025-01-01T00:00:00',
+            },
         ]
 
         entity_b = [
-            {'uuid': 'ub1', 'group_id': 'group_b', 'name': 'Alice', 'labels': ['Person'],
-             'summary': 'Manager', 'created_at': '2025-01-01T00:00:00'},
-            {'uuid': 'ub2', 'group_id': 'group_b', 'name': 'Bob', 'labels': ['Person'],
-             'summary': 'Designer', 'created_at': '2025-01-01T00:00:00'},
-            {'uuid': 'ub3', 'group_id': 'group_b', 'name': 'Charlie', 'labels': ['Person'],
-             'summary': 'New person', 'created_at': '2025-02-01T00:00:00'},
+            {
+                'uuid': 'ub1',
+                'group_id': 'group_b',
+                'name': 'Alice',
+                'labels': ['Person'],
+                'summary': 'Manager',
+                'created_at': '2025-01-01T00:00:00',
+            },
+            {
+                'uuid': 'ub2',
+                'group_id': 'group_b',
+                'name': 'Bob',
+                'labels': ['Person'],
+                'summary': 'Designer',
+                'created_at': '2025-01-01T00:00:00',
+            },
+            {
+                'uuid': 'ub3',
+                'group_id': 'group_b',
+                'name': 'Charlie',
+                'labels': ['Person'],
+                'summary': 'New person',
+                'created_at': '2025-02-01T00:00:00',
+            },
         ]
         edge_b = [
-            {'uuid': 'eb1', 'group_id': 'group_b',
-             'source_node_uuid': 'ub1', 'target_node_uuid': 'ub2',
-             'name': 'KNOWS', 'fact': 'Alice knows Bob well',
-             'fact_embedding': None, 'episodes': [], 'expired_at': None,
-             'valid_at': None, 'invalid_at': None, 'reference_time': None,
-             'attributes': {}, 'created_at': '2025-01-01T00:00:00'},
-            {'uuid': 'eb2', 'group_id': 'group_b',
-             'source_node_uuid': 'ub1', 'target_node_uuid': 'ub3',
-             'name': 'KNOWS', 'fact': 'Alice knows Charlie',
-             'fact_embedding': None, 'episodes': [], 'expired_at': None,
-             'valid_at': None, 'invalid_at': None, 'reference_time': None,
-             'attributes': {}, 'created_at': '2025-02-01T00:00:00'},
+            {
+                'uuid': 'eb1',
+                'group_id': 'group_b',
+                'source_node_uuid': 'ub1',
+                'target_node_uuid': 'ub2',
+                'name': 'KNOWS',
+                'fact': 'Alice knows Bob well',
+                'fact_embedding': None,
+                'episodes': [],
+                'expired_at': None,
+                'valid_at': None,
+                'invalid_at': None,
+                'reference_time': None,
+                'attributes': {},
+                'created_at': '2025-01-01T00:00:00',
+            },
+            {
+                'uuid': 'eb2',
+                'group_id': 'group_b',
+                'source_node_uuid': 'ub1',
+                'target_node_uuid': 'ub3',
+                'name': 'KNOWS',
+                'fact': 'Alice knows Charlie',
+                'fact_embedding': None,
+                'episodes': [],
+                'expired_at': None,
+                'valid_at': None,
+                'invalid_at': None,
+                'reference_time': None,
+                'attributes': {},
+                'created_at': '2025-02-01T00:00:00',
+            },
         ]
 
-        export_a = _make_export_dir(tmp_path, 'group_a', {
-            'entity_nodes': entity_a, 'entity_edges': edge_a,
-        })
-        export_b = _make_export_dir(tmp_path, 'group_b', {
-            'entity_nodes': entity_b, 'entity_edges': edge_b,
-        })
+        export_a = _make_export_dir(
+            tmp_path,
+            'group_a',
+            {
+                'entity_nodes': entity_a,
+                'entity_edges': edge_a,
+            },
+        )
+        export_b = _make_export_dir(
+            tmp_path,
+            'group_b',
+            {
+                'entity_nodes': entity_b,
+                'entity_edges': edge_b,
+            },
+        )
 
         # --- Phase 2: Diff ---
         patch = diff_groups(export_a, export_b)
@@ -190,22 +263,52 @@ class TestE2EFullPipeline:
         # Target driver has group_b data (including Dave who should be removed)
         target_data = {
             'entity_nodes': [
-                {'uuid': 'ub1', 'group_id': 'group_b', 'name': 'Alice',
-                 'labels': ['Person'], 'summary': 'Manager'},
-                {'uuid': 'ub2', 'group_id': 'group_b', 'name': 'Bob',
-                 'labels': ['Person'], 'summary': 'Designer'},
-                {'uuid': 'ub3', 'group_id': 'group_b', 'name': 'Charlie',
-                 'labels': ['Person'], 'summary': 'New person'},
-                {'uuid': 'ud1', 'group_id': 'group_b', 'name': 'Dave',
-                 'labels': ['Person'], 'summary': 'Removed person'},
+                {
+                    'uuid': 'ub1',
+                    'group_id': 'group_b',
+                    'name': 'Alice',
+                    'labels': ['Person'],
+                    'summary': 'Manager',
+                },
+                {
+                    'uuid': 'ub2',
+                    'group_id': 'group_b',
+                    'name': 'Bob',
+                    'labels': ['Person'],
+                    'summary': 'Designer',
+                },
+                {
+                    'uuid': 'ub3',
+                    'group_id': 'group_b',
+                    'name': 'Charlie',
+                    'labels': ['Person'],
+                    'summary': 'New person',
+                },
+                {
+                    'uuid': 'ud1',
+                    'group_id': 'group_b',
+                    'name': 'Dave',
+                    'labels': ['Person'],
+                    'summary': 'Removed person',
+                },
             ],
             'entity_edges': [
-                {'uuid': 'eb1', 'group_id': 'group_b',
-                 'source_node_uuid': 'ub1', 'target_node_uuid': 'ub2',
-                 'name': 'KNOWS', 'fact': 'Alice knows Bob well'},
-                {'uuid': 'eb2', 'group_id': 'group_b',
-                 'source_node_uuid': 'ub1', 'target_node_uuid': 'ub3',
-                 'name': 'KNOWS', 'fact': 'Alice knows Charlie'},
+                {
+                    'uuid': 'eb1',
+                    'group_id': 'group_b',
+                    'source_node_uuid': 'ub1',
+                    'target_node_uuid': 'ub2',
+                    'name': 'KNOWS',
+                    'fact': 'Alice knows Bob well',
+                },
+                {
+                    'uuid': 'eb2',
+                    'group_id': 'group_b',
+                    'source_node_uuid': 'ub1',
+                    'target_node_uuid': 'ub3',
+                    'name': 'KNOWS',
+                    'fact': 'Alice knows Charlie',
+                },
             ],
         }
         mock_driver = _make_mock_driver(target_data, embedding_dimension=3)
@@ -222,48 +325,97 @@ class TestE2EFullPipeline:
     async def test_pipeline_with_episodic_and_communities(self, tmp_path: Path) -> None:
         """Pipeline including episodic nodes, communities, and saga nodes."""
         episodic_a = [
-            {'uuid': 'epa1', 'group_id': 'group_a', 'name': 'Ep1',
-             'source': 'txt', 'source_description': 'a', 'content': 'hello',
-             'valid_at': '2025-01-01T00:00:00', 'entity_edges': [],
-             'episode_metadata': None, 'created_at': '2025-01-01T00:00:00'},
+            {
+                'uuid': 'epa1',
+                'group_id': 'group_a',
+                'name': 'Ep1',
+                'source': 'txt',
+                'source_description': 'a',
+                'content': 'hello',
+                'valid_at': '2025-01-01T00:00:00',
+                'entity_edges': [],
+                'episode_metadata': None,
+                'created_at': '2025-01-01T00:00:00',
+            },
         ]
         community_a = [
-            {'uuid': 'ca1', 'group_id': 'group_a', 'name': 'Tech Community',
-             'summary': 'Old summary', 'created_at': '2025-01-01T00:00:00'},
+            {
+                'uuid': 'ca1',
+                'group_id': 'group_a',
+                'name': 'Tech Community',
+                'summary': 'Old summary',
+                'created_at': '2025-01-01T00:00:00',
+            },
         ]
         saga_a = [
-            {'uuid': 'sa1', 'group_id': 'group_a', 'name': 'Old Saga',
-             'summary': '', 'first_episode_uuid': None, 'last_episode_uuid': None,
-             'last_summarized_at': None, 'last_summarized_episode_valid_at': None,
-             'created_at': '2025-01-01T00:00:00'},
+            {
+                'uuid': 'sa1',
+                'group_id': 'group_a',
+                'name': 'Old Saga',
+                'summary': '',
+                'first_episode_uuid': None,
+                'last_episode_uuid': None,
+                'last_summarized_at': None,
+                'last_summarized_episode_valid_at': None,
+                'created_at': '2025-01-01T00:00:00',
+            },
         ]
 
         episodic_b = [
-            {'uuid': 'epb1', 'group_id': 'group_b', 'name': 'Ep1',
-             'source': 'txt', 'source_description': 'b', 'content': 'hello',
-             'valid_at': '2025-01-01T00:00:00', 'entity_edges': [],
-             'episode_metadata': None, 'created_at': '2025-01-01T00:00:00'},
-            {'uuid': 'epb2', 'group_id': 'group_b', 'name': 'Ep2',
-             'source': 'txt', 'source_description': 'c', 'content': 'world',
-             'valid_at': '2025-02-01T00:00:00', 'entity_edges': [],
-             'episode_metadata': None, 'created_at': '2025-02-01T00:00:00'},
+            {
+                'uuid': 'epb1',
+                'group_id': 'group_b',
+                'name': 'Ep1',
+                'source': 'txt',
+                'source_description': 'b',
+                'content': 'hello',
+                'valid_at': '2025-01-01T00:00:00',
+                'entity_edges': [],
+                'episode_metadata': None,
+                'created_at': '2025-01-01T00:00:00',
+            },
+            {
+                'uuid': 'epb2',
+                'group_id': 'group_b',
+                'name': 'Ep2',
+                'source': 'txt',
+                'source_description': 'c',
+                'content': 'world',
+                'valid_at': '2025-02-01T00:00:00',
+                'entity_edges': [],
+                'episode_metadata': None,
+                'created_at': '2025-02-01T00:00:00',
+            },
         ]
         community_b = [
-            {'uuid': 'cb1', 'group_id': 'group_b', 'name': 'Tech Community',
-             'summary': 'New summary', 'created_at': '2025-01-01T00:00:00'},
+            {
+                'uuid': 'cb1',
+                'group_id': 'group_b',
+                'name': 'Tech Community',
+                'summary': 'New summary',
+                'created_at': '2025-01-01T00:00:00',
+            },
         ]
         saga_b = []  # Saga removed in group_b
 
-        export_a = _make_export_dir(tmp_path, 'group_a', {
-            'episodic_nodes': episodic_a,
-            'community_nodes': community_a,
-            'saga_nodes': saga_a,
-        })
-        export_b = _make_export_dir(tmp_path, 'group_b', {
-            'episodic_nodes': episodic_b,
-            'community_nodes': community_b,
-            'saga_nodes': saga_b,
-        })
+        export_a = _make_export_dir(
+            tmp_path,
+            'group_a',
+            {
+                'episodic_nodes': episodic_a,
+                'community_nodes': community_a,
+                'saga_nodes': saga_a,
+            },
+        )
+        export_b = _make_export_dir(
+            tmp_path,
+            'group_b',
+            {
+                'episodic_nodes': episodic_b,
+                'community_nodes': community_b,
+                'saga_nodes': saga_b,
+            },
+        )
 
         # Diff
         patch = diff_groups(export_a, export_b)
@@ -294,18 +446,39 @@ class TestE2EFullPipeline:
         target_data = {
             'entity_nodes': [],
             'episodic_nodes': [
-                {'uuid': 'epb1', 'group_id': 'group_b', 'name': 'Ep1',
-                 'source': 'txt', 'source_description': 'b', 'content': 'hello',
-                 'valid_at': '2025-01-01T00:00:00', 'entity_edges': [],
-                 'episode_metadata': None, 'created_at': '2025-01-01T00:00:00'},
-                {'uuid': 'epb2', 'group_id': 'group_b', 'name': 'Ep2',
-                 'source': 'txt', 'source_description': 'c', 'content': 'world',
-                 'valid_at': '2025-02-01T00:00:00', 'entity_edges': [],
-                 'episode_metadata': None, 'created_at': '2025-02-01T00:00:00'},
+                {
+                    'uuid': 'epb1',
+                    'group_id': 'group_b',
+                    'name': 'Ep1',
+                    'source': 'txt',
+                    'source_description': 'b',
+                    'content': 'hello',
+                    'valid_at': '2025-01-01T00:00:00',
+                    'entity_edges': [],
+                    'episode_metadata': None,
+                    'created_at': '2025-01-01T00:00:00',
+                },
+                {
+                    'uuid': 'epb2',
+                    'group_id': 'group_b',
+                    'name': 'Ep2',
+                    'source': 'txt',
+                    'source_description': 'c',
+                    'content': 'world',
+                    'valid_at': '2025-02-01T00:00:00',
+                    'entity_edges': [],
+                    'episode_metadata': None,
+                    'created_at': '2025-02-01T00:00:00',
+                },
             ],
             'community_nodes': [
-                {'uuid': 'cb1', 'group_id': 'group_b', 'name': 'Tech Community',
-                 'summary': 'New summary', 'created_at': '2025-01-01T00:00:00'},
+                {
+                    'uuid': 'cb1',
+                    'group_id': 'group_b',
+                    'name': 'Tech Community',
+                    'summary': 'New summary',
+                    'created_at': '2025-01-01T00:00:00',
+                },
             ],
             'saga_nodes': [],
             'entity_edges': [],
@@ -328,14 +501,29 @@ class TestE2EFullPipeline:
     async def test_dry_run_pipeline(self, tmp_path: Path) -> None:
         """Full pipeline dry run validates without applying."""
         entity_a = [
-            {'uuid': 'ua1', 'group_id': 'group_a', 'name': 'Alice',
-             'labels': ['Person'], 'summary': 'Engineer'},
+            {
+                'uuid': 'ua1',
+                'group_id': 'group_a',
+                'name': 'Alice',
+                'labels': ['Person'],
+                'summary': 'Engineer',
+            },
         ]
         entity_b = [
-            {'uuid': 'ub1', 'group_id': 'group_b', 'name': 'Alice',
-             'labels': ['Person'], 'summary': 'Manager'},
-            {'uuid': 'ub2', 'group_id': 'group_b', 'name': 'Bob',
-             'labels': ['Person'], 'summary': 'New'},
+            {
+                'uuid': 'ub1',
+                'group_id': 'group_b',
+                'name': 'Alice',
+                'labels': ['Person'],
+                'summary': 'Manager',
+            },
+            {
+                'uuid': 'ub2',
+                'group_id': 'group_b',
+                'name': 'Bob',
+                'labels': ['Person'],
+                'summary': 'New',
+            },
         ]
 
         export_a = _make_export_dir(tmp_path, 'group_a', {'entity_nodes': entity_a})
@@ -359,12 +547,22 @@ class TestE2EFullPipeline:
     async def test_pipeline_with_conflicts(self, tmp_path: Path) -> None:
         """Pipeline handles conflict records between groups."""
         entity_a = [
-            {'uuid': 'ua1', 'group_id': 'group_a', 'name': 'Alice',
-             'labels': ['Person'], 'summary': 'Engineer'},
+            {
+                'uuid': 'ua1',
+                'group_id': 'group_a',
+                'name': 'Alice',
+                'labels': ['Person'],
+                'summary': 'Engineer',
+            },
         ]
         entity_b = [
-            {'uuid': 'ub1', 'group_id': 'group_b', 'name': 'Alice',
-             'labels': ['Person'], 'summary': 'Manager'},
+            {
+                'uuid': 'ub1',
+                'group_id': 'group_b',
+                'name': 'Alice',
+                'labels': ['Person'],
+                'summary': 'Manager',
+            },
         ]
 
         export_a = _make_export_dir(tmp_path, 'group_a', {'entity_nodes': entity_a})
@@ -379,9 +577,14 @@ class TestE2EFullPipeline:
 
         target_data = {
             'entity_nodes': [entity_b[0]],
-            'episodic_nodes': [], 'community_nodes': [], 'saga_nodes': [],
-            'entity_edges': [], 'episodic_edges': [], 'community_edges': [],
-            'has_episode_edges': [], 'next_episode_edges': [],
+            'episodic_nodes': [],
+            'community_nodes': [],
+            'saga_nodes': [],
+            'entity_edges': [],
+            'episodic_edges': [],
+            'community_edges': [],
+            'has_episode_edges': [],
+            'next_episode_edges': [],
         }
         mock_driver = _make_mock_driver(target_data, embedding_dimension=3)
 
@@ -395,9 +598,14 @@ class TestE2EFullPipeline:
         # Test theirs strategy (fresh driver)
         target_data2 = {
             'entity_nodes': [entity_b[0]],
-            'episodic_nodes': [], 'community_nodes': [], 'saga_nodes': [],
-            'entity_edges': [], 'episodic_edges': [], 'community_edges': [],
-            'has_episode_edges': [], 'next_episode_edges': [],
+            'episodic_nodes': [],
+            'community_nodes': [],
+            'saga_nodes': [],
+            'entity_edges': [],
+            'episodic_edges': [],
+            'community_edges': [],
+            'has_episode_edges': [],
+            'next_episode_edges': [],
         }
         mock_driver2 = _make_mock_driver(target_data2, embedding_dimension=3)
 
@@ -413,24 +621,49 @@ class TestE2ECascadeDelete:
     async def test_remove_entity_cascades_to_edges(self, tmp_path: Path) -> None:
         """Removing an entity_node cascades DELETE to entity_edges."""
         entity_a = [
-            {'uuid': 'e1', 'group_id': 'group_a', 'name': 'Bob',
-             'labels': ['Person'], 'summary': 'To be removed'},
+            {
+                'uuid': 'e1',
+                'group_id': 'group_a',
+                'name': 'Bob',
+                'labels': ['Person'],
+                'summary': 'To be removed',
+            },
         ]
         edge_a = [
-            {'uuid': 'ee1', 'group_id': 'group_a',
-             'source_node_uuid': 'e1', 'target_node_uuid': 'e1',
-             'name': 'KNOWS', 'fact': 'self knows', 'fact_embedding': None,
-             'episodes': [], 'expired_at': None, 'valid_at': None,
-             'invalid_at': None, 'reference_time': None, 'attributes': {},
-             'created_at': '2025-01-01T00:00:00'},
+            {
+                'uuid': 'ee1',
+                'group_id': 'group_a',
+                'source_node_uuid': 'e1',
+                'target_node_uuid': 'e1',
+                'name': 'KNOWS',
+                'fact': 'self knows',
+                'fact_embedding': None,
+                'episodes': [],
+                'expired_at': None,
+                'valid_at': None,
+                'invalid_at': None,
+                'reference_time': None,
+                'attributes': {},
+                'created_at': '2025-01-01T00:00:00',
+            },
         ]
 
-        export_a = _make_export_dir(tmp_path, 'group_a', {
-            'entity_nodes': entity_a, 'entity_edges': edge_a,
-        })
-        export_b = _make_export_dir(tmp_path, 'group_b', {  # Everything removed
-            'entity_nodes': [], 'entity_edges': [],
-        })
+        export_a = _make_export_dir(
+            tmp_path,
+            'group_a',
+            {
+                'entity_nodes': entity_a,
+                'entity_edges': edge_a,
+            },
+        )
+        export_b = _make_export_dir(
+            tmp_path,
+            'group_b',
+            {  # Everything removed
+                'entity_nodes': [],
+                'entity_edges': [],
+            },
+        )
 
         patch = diff_groups(export_a, export_b)
 
@@ -441,9 +674,13 @@ class TestE2ECascadeDelete:
         target_data = {
             'entity_nodes': [entity_a[0]],
             'entity_edges': [edge_a[0]],
-            'episodic_nodes': [], 'community_nodes': [], 'saga_nodes': [],
-            'episodic_edges': [], 'community_edges': [],
-            'has_episode_edges': [], 'next_episode_edges': [],
+            'episodic_nodes': [],
+            'community_nodes': [],
+            'saga_nodes': [],
+            'episodic_edges': [],
+            'community_edges': [],
+            'has_episode_edges': [],
+            'next_episode_edges': [],
         }
         # Override group_id in target to match to_group_id
         for row in target_data['entity_nodes']:
@@ -463,12 +700,10 @@ class TestE2ECascadeDelete:
 
         # Verify DELETE calls include both node and edge
         delete_calls = [
-            c for c in mock_driver.execute_query.call_args_list
+            c
+            for c in mock_driver.execute_query.call_args_list
             if 'DELETE FROM' in str(c.kwargs.get('query', c.args[0] if c.args else ''))
         ]
-        deleted_uuids = {
-            c.kwargs.get('params', {}).get('uuid')
-            for c in delete_calls
-        }
+        deleted_uuids = {c.kwargs.get('params', {}).get('uuid') for c in delete_calls}
         assert 'e1' in deleted_uuids
         assert 'ee1' in deleted_uuids
