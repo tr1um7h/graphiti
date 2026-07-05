@@ -232,6 +232,42 @@ class TestCompareFields:
         result = compare_fields(left, right)
         assert result == {'summary': {'old': 'Eng', 'new': None}}
 
+    def test_nested_dict_comparison(self) -> None:
+        """compare_fields detects changes in nested dict values."""
+        left = {'name': 'Alice', 'attributes': {'version': '1.0', 'lang': 'en'}}
+        right = {'name': 'Alice', 'attributes': {'version': '2.0', 'lang': 'en'}}
+        result = compare_fields(left, right)
+        assert 'attributes' in result
+        assert result['attributes']['old'] == {'version': '1.0', 'lang': 'en'}
+        assert result['attributes']['new'] == {'version': '2.0', 'lang': 'en'}
+
+    def test_nested_list_comparison(self) -> None:
+        """compare_fields detects changes in list values."""
+        left = {'name': 'Alice', 'labels': ['Person', 'Employee']}
+        right = {'name': 'Alice', 'labels': ['Person', 'Manager']}
+        result = compare_fields(left, right)
+        assert 'labels' in result
+        assert result['labels']['old'] == ['Person', 'Employee']
+        assert result['labels']['new'] == ['Person', 'Manager']
+
+    def test_none_vs_empty_list(self) -> None:
+        """None and empty list are correctly detected as different."""
+        left = {'name': 'Alice', 'labels': None}
+        right = {'name': 'Alice', 'labels': []}
+        result = compare_fields(left, right)
+        assert result == {'labels': {'old': None, 'new': []}}
+
+    def test_falsey_values_compared_correctly(self) -> None:
+        """0, False, empty string are compared by value, not truthiness."""
+        left = {'name': 'Alice', 'count': 0, 'active': False, 'note': ''}
+        right = {'name': 'Alice', 'count': 1, 'active': True, 'note': 'x'}
+        result = compare_fields(left, right)
+        assert result == {
+            'count': {'old': 0, 'new': 1},
+            'active': {'old': False, 'new': True},
+            'note': {'old': '', 'new': 'x'},
+        }
+
 
 # ---------------------------------------------------------------------------
 # Test: extract_match_fields
@@ -734,3 +770,133 @@ class TestDiffGroups:
         # But non-ignored fields remain
         assert added['name'] == 'KNOWS'
         assert added['fact'] == 'A knows B'
+
+    def test_community_edges_diff(self, tmp_path: Path) -> None:
+        """Community edges diff detects added/removed by (source, target) key."""
+        left = _make_export_dir(
+            tmp_path,
+            'g_left',
+            {
+                'community_edges': [
+                    {
+                        'uuid': 'ce1', 'group_id': 'g_left',
+                        'source_node_uuid': 'c1', 'target_node_uuid': 'e1',
+                        'name': 'HAS_MEMBER', 'fact': 'old fact',
+                    },
+                ]
+            },
+        )
+        right = _make_export_dir(
+            tmp_path,
+            'g_right',
+            {
+                'community_edges': [
+                    {
+                        'uuid': 'ce2', 'group_id': 'g_right',
+                        'source_node_uuid': 'c2', 'target_node_uuid': 'e2',
+                        'name': 'NEW_EDGE', 'fact': 'new fact',
+                    },
+                ]
+            },
+        )
+
+        patch = diff_groups(left, right)
+        changes = patch['changes']['community_edges']
+
+        assert len(changes['added']) == 1
+        assert len(changes['removed']) == 1
+        assert changes['added'][0]['name'] == 'NEW_EDGE'
+        assert changes['removed'][0]['name'] == 'HAS_MEMBER'
+
+    def test_episodic_edges_diff(self, tmp_path: Path) -> None:
+        """Episodic edges diff uses (source, target) business key."""
+        left = _make_export_dir(
+            tmp_path,
+            'g_left',
+            {
+                'episodic_edges': [
+                    {'uuid': 'ee1', 'group_id': 'g_left',
+                     'source_node_uuid': 'ep1', 'target_node_uuid': 'e1'},
+                ]
+            },
+        )
+        right = _make_export_dir(
+            tmp_path,
+            'g_right',
+            {
+                'episodic_edges': [
+                    {'uuid': 'ee2', 'group_id': 'g_right',
+                     'source_node_uuid': 'ep1', 'target_node_uuid': 'e1'},
+                    {'uuid': 'ee3', 'group_id': 'g_right',
+                     'source_node_uuid': 'ep2', 'target_node_uuid': 'e2'},
+                ]
+            },
+        )
+
+        patch = diff_groups(left, right)
+        changes = patch['changes']['episodic_edges']
+
+        # Same (source, target) → no change detected (UUID/group_id ignored)
+        assert len(changes['added']) == 1
+        assert len(changes['removed']) == 0
+        assert len(changes['modified']) == 0
+
+    def test_has_episode_edges_diff(self, tmp_path: Path) -> None:
+        """has_episode_edges diff uses (source, target) key."""
+        left = _make_export_dir(
+            tmp_path,
+            'g_left',
+            {
+                'has_episode_edges': [
+                    {'uuid': 'he1', 'group_id': 'g_left',
+                     'source_node_uuid': 'saga1', 'target_node_uuid': 'ep1'},
+                ]
+            },
+        )
+        right = _make_export_dir(
+            tmp_path,
+            'g_right',
+            {
+                'has_episode_edges': [
+                    {'uuid': 'he2', 'group_id': 'g_right',
+                     'source_node_uuid': 'saga1', 'target_node_uuid': 'ep1'},
+                ]
+            },
+        )
+
+        patch = diff_groups(left, right)
+        changes = patch['changes']['has_episode_edges']
+
+        # Identical business key → no changes
+        assert changes['added'] == []
+        assert changes['removed'] == []
+        assert changes['modified'] == []
+
+    def test_next_episode_edges_diff(self, tmp_path: Path) -> None:
+        """next_episode_edges diff detects changes by (source, target) key."""
+        left = _make_export_dir(
+            tmp_path,
+            'g_left',
+            {
+                'next_episode_edges': [
+                    {'uuid': 'ne1', 'group_id': 'g_left',
+                     'source_node_uuid': 'ep1', 'target_node_uuid': 'ep2'},
+                ]
+            },
+        )
+        right = _make_export_dir(
+            tmp_path,
+            'g_right',
+            {
+                'next_episode_edges': [
+                    {'uuid': 'ne2', 'group_id': 'g_right',
+                     'source_node_uuid': 'ep1', 'target_node_uuid': 'ep3'},
+                ]
+            },
+        )
+
+        patch = diff_groups(left, right)
+        changes = patch['changes']['next_episode_edges']
+
+        assert len(changes['added']) == 1
+        assert len(changes['removed']) == 1

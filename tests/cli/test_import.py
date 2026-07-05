@@ -359,3 +359,351 @@ async def test_import_saga_node_null_episodes(tmp_path: Path) -> None:
     assert params['first_episode_uuid'] is None
     assert params['last_episode_uuid'] is None
     assert params['group_id'] == 'new-group'
+
+
+# ---------------------------------------------------------------------------
+# Test 8: FK references are remapped in edge tables
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_import_remaps_fk_references_in_edges(tmp_path: Path) -> None:
+    """source_node_uuid and target_node_uuid in edges are remapped."""
+    entity_record = {
+        'uuid': 'old-entity-1',
+        'group_id': 'old-group',
+        'name': 'Python',
+        'summary': '',
+        'labels': [],
+        'attributes': {},
+        'name_embedding': None,
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+    edge_record = {
+        'uuid': 'old-edge-1',
+        'group_id': 'old-group',
+        'source_node_uuid': 'old-entity-1',
+        'target_node_uuid': 'old-entity-1',
+        'name': 'SELF_REF',
+        'fact': '',
+        'fact_embedding': None,
+        'episodes': [],
+        'expired_at': None,
+        'valid_at': None,
+        'invalid_at': None,
+        'reference_time': None,
+        'attributes': {},
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+
+    export_dir = _create_export_dir(
+        tmp_path,
+        entity_nodes=[entity_record],
+        entity_edges=[edge_record],
+    )
+    _write_metadata(export_dir / 'metadata.json', embedding_dimension=1024)
+
+    driver = _make_mock_driver(embedding_dimension=1024)
+
+    await import_group(driver, export_dir, 'new-group')
+
+    # Find the entity_edges INSERT
+    edge_inserts = [
+        call
+        for call in driver.execute_query.call_args_list
+        if 'INSERT INTO' in str(call) and 'entity_edges' in str(call)
+    ]
+    assert len(edge_inserts) == 1
+    params = edge_inserts[0].kwargs.get('params', {})
+
+    # FK references must be remapped to new UUIDs
+    assert params['source_node_uuid'] != 'old-entity-1'
+    assert params['target_node_uuid'] != 'old-entity-1'
+    # Both source and target point to the same old entity, so they remap to the same new UUID
+    assert params['source_node_uuid'] == params['target_node_uuid']
+    # Verify it's a valid UUID format (not the old value)
+    import uuid
+    uuid.UUID(params['source_node_uuid'])
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Community nodes and edges
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_import_community_with_edges(tmp_path: Path) -> None:
+    """Community nodes and community edges import correctly."""
+    community = {
+        'uuid': 'old-comm-1',
+        'group_id': 'old-group',
+        'name': 'Community A',
+        'summary': '',
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+    entity = {
+        'uuid': 'some-entity-uuid',
+        'group_id': 'old-group',
+        'name': 'Entity X',
+        'summary': '',
+        'labels': [],
+        'attributes': {},
+        'name_embedding': None,
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+    comm_edge = {
+        'uuid': 'old-ce-1',
+        'group_id': 'old-group',
+        'source_node_uuid': 'old-comm-1',
+        'target_node_uuid': 'some-entity-uuid',
+        'name': 'HAS_MEMBER',
+        'fact': 'Community A has member X',
+        'fact_embedding': None,
+        'episodes': [],
+        'expired_at': None,
+        'valid_at': None,
+        'invalid_at': None,
+        'reference_time': None,
+        'attributes': {},
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+
+    export_dir = _create_export_dir(
+        tmp_path,
+        entity_nodes=[entity],
+        community_nodes=[community],
+        community_edges=[comm_edge],
+    )
+    _write_metadata(export_dir / 'metadata.json', embedding_dimension=1024)
+
+    driver = _make_mock_driver(embedding_dimension=1024)
+
+    await import_group(driver, export_dir, 'new-group')
+
+    # Verify community_nodes INSERT
+    comm_inserts = [
+        call
+        for call in driver.execute_query.call_args_list
+        if 'INSERT INTO' in str(call) and 'community_nodes' in str(call)
+    ]
+    assert len(comm_inserts) == 1
+    comm_params = comm_inserts[0].kwargs.get('params', {})
+    assert comm_params['name'] == 'Community A'
+    assert comm_params['group_id'] == 'new-group'
+
+    # Verify community_edges INSERT with remapped source
+    ce_inserts = [
+        call
+        for call in driver.execute_query.call_args_list
+        if 'INSERT INTO' in str(call) and 'community_edges' in str(call)
+    ]
+    assert len(ce_inserts) == 1
+    ce_params = ce_inserts[0].kwargs.get('params', {})
+    # source_node_uuid should be remapped to the new community uuid
+    assert ce_params['source_node_uuid'] == comm_params['uuid']
+    assert ce_params['group_id'] == 'new-group'
+
+
+# ---------------------------------------------------------------------------
+# Test 10: Has_episode_edges and next_episode_edges
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_import_episode_relationship_edges(tmp_path: Path) -> None:
+    """has_episode_edges and next_episode_edges import with remapped FKs."""
+    saga_record = {
+        'uuid': 'old-saga',
+        'group_id': 'old-group',
+        'name': 'Saga',
+        'summary': '',
+        'first_episode_uuid': None,
+        'last_episode_uuid': None,
+        'last_summarized_at': None,
+        'last_summarized_episode_valid_at': None,
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+    episodic_record = {
+        'uuid': 'old-ep',
+        'group_id': 'old-group',
+        'name': 'Ep',
+        'source': 'txt',
+        'source_description': '',
+        'content': 'content',
+        'valid_at': '2025-01-01T00:00:00+00:00',
+        'entity_edges': [],
+        'episode_metadata': None,
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+    episodic_record2 = {
+        'uuid': 'old-ep2',
+        'group_id': 'old-group',
+        'name': 'Ep2',
+        'source': 'txt',
+        'source_description': '',
+        'content': 'content 2',
+        'valid_at': '2025-02-01T00:00:00+00:00',
+        'entity_edges': [],
+        'episode_metadata': None,
+        'created_at': '2025-02-01T00:00:00+00:00',
+    }
+    has_ep = {
+        'uuid': 'old-he',
+        'group_id': 'old-group',
+        'source_node_uuid': 'old-saga',
+        'target_node_uuid': 'old-ep',
+    }
+    next_ep = {
+        'uuid': 'old-ne',
+        'group_id': 'old-group',
+        'source_node_uuid': 'old-ep',
+        'target_node_uuid': 'old-ep2',
+    }
+
+    export_dir = _create_export_dir(
+        tmp_path,
+        saga_nodes=[saga_record],
+        episodic_nodes=[episodic_record, episodic_record2],
+        has_episode_edges=[has_ep],
+        next_episode_edges=[next_ep],
+    )
+    _write_metadata(export_dir / 'metadata.json', embedding_dimension=1024)
+
+    driver = _make_mock_driver(embedding_dimension=1024)
+
+    await import_group(driver, export_dir, 'new-group')
+
+    # Collect all inserted UUIDs by table (list per table for multi-record)
+    inserted: dict[str, list[dict]] = {}
+    for call in driver.execute_query.call_args_list:
+        if 'INSERT INTO' not in str(call):
+            continue
+        query_str = str(call)
+        for table in ['saga_nodes', 'episodic_nodes', 'has_episode_edges', 'next_episode_edges']:
+            if table in query_str:
+                params = call.kwargs.get('params', {})
+                inserted.setdefault(table, []).append(params)
+                break
+
+    # has_episode_edges.source_node_uuid should point to the remapped saga
+    assert inserted['has_episode_edges'][0]['source_node_uuid'] == inserted['saga_nodes'][0]['uuid']
+
+    # has_episode_edges.target_node_uuid should point to old-ep (first episodic node)
+    # Find the episodic node whose name is 'Ep' (old-ep → this is the one has_ep references)
+    ep_uuids = {ep['name']: ep['uuid'] for ep in inserted['episodic_nodes']}
+    assert inserted['has_episode_edges'][0]['target_node_uuid'] == ep_uuids['Ep']
+
+    # next_episode_edges.source_node_uuid should point to old-ep
+    assert inserted['next_episode_edges'][0]['source_node_uuid'] == ep_uuids['Ep']
+    # next_episode_edges.target_node_uuid should point to old-ep2
+    assert inserted['next_episode_edges'][0]['target_node_uuid'] == ep_uuids['Ep2']
+
+
+# ---------------------------------------------------------------------------
+# Test 11: search_vector is excluded from INSERT
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_import_excludes_search_vector_from_insert(tmp_path: Path) -> None:
+    """search_vector is a GENERATED column and must not appear in INSERT."""
+    entity_record = {
+        'uuid': 'old-e1',
+        'group_id': 'old-group',
+        'name': 'Entity',
+        'summary': '',
+        'labels': [],
+        'attributes': {},
+        'name_embedding': None,
+        'search_vector': "'entity':1A",
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+
+    export_dir = _create_export_dir(
+        tmp_path,
+        entity_nodes=[entity_record],
+    )
+    _write_metadata(export_dir / 'metadata.json', embedding_dimension=1024)
+
+    driver = _make_mock_driver(embedding_dimension=1024)
+
+    await import_group(driver, export_dir, 'new-group')
+
+    insert_calls = [
+        call
+        for call in driver.execute_query.call_args_list
+        if 'INSERT INTO' in str(call)
+    ]
+    assert len(insert_calls) == 1
+    params = insert_calls[0].kwargs.get('params', {})
+    assert 'search_vector' not in params
+    assert 'name' in params
+
+
+# ---------------------------------------------------------------------------
+# Test 12: FK ordering — nodes before edges
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_import_inserts_nodes_before_edges(tmp_path: Path) -> None:
+    """Node tables must be INSERTed before edge tables for FK integrity."""
+    entity_record = {
+        'uuid': 'old-e1',
+        'group_id': 'old-group',
+        'name': 'Entity',
+        'summary': '',
+        'labels': [],
+        'attributes': {},
+        'name_embedding': None,
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+    edge_record = {
+        'uuid': 'old-ee-1',
+        'group_id': 'old-group',
+        'source_node_uuid': 'old-e1',
+        'target_node_uuid': 'old-e1',
+        'name': 'KNOWS',
+        'fact': '',
+        'fact_embedding': None,
+        'episodes': [],
+        'expired_at': None,
+        'valid_at': None,
+        'invalid_at': None,
+        'reference_time': None,
+        'attributes': {},
+        'created_at': '2025-01-01T00:00:00+00:00',
+    }
+
+    export_dir = _create_export_dir(
+        tmp_path,
+        entity_nodes=[entity_record],
+        entity_edges=[edge_record],
+    )
+    _write_metadata(export_dir / 'metadata.json', embedding_dimension=1024)
+
+    driver = _make_mock_driver(embedding_dimension=1024)
+
+    await import_group(driver, export_dir, 'new-group')
+
+    # Find order of INSERTs
+    insert_tables = []
+    for call in driver.execute_query.call_args_list:
+        query_str = str(call)
+        if 'INSERT INTO' in query_str:
+            for table in [
+                'entity_nodes', 'episodic_nodes', 'community_nodes', 'saga_nodes',
+                'entity_edges', 'episodic_edges', 'community_edges',
+                'has_episode_edges', 'next_episode_edges',
+            ]:
+                if table in query_str:
+                    insert_tables.append(table)
+                    break
+
+    # Find positions
+    entity_pos = insert_tables.index('entity_nodes')
+    edge_pos = insert_tables.index('entity_edges')
+    assert entity_pos < edge_pos, (
+        f'entity_nodes must be inserted before entity_edges, '
+        f'got entity_nodes at {entity_pos}, entity_edges at {edge_pos}'
+    )
