@@ -72,8 +72,15 @@ async def handle_command(args):
         finally:
             await driver.close()
     elif args.command == 'import':
-        print('Import command not yet implemented')
-        sys.exit(1)
+        from cli.import_ import import_group
+        from graphiti_core.driver.postgres_age.driver import PostgresAgeDriver
+
+        driver = PostgresAgeDriver(dsn=args.dsn, schema=args.schema)
+        try:
+            await import_group(driver, Path(args.input_dir), args.new_group_id, args.overwrite)
+            print(f'Imported to group "{args.new_group_id}"')
+        finally:
+            await driver.close()
     elif args.command == 'diff':
         print('Diff command not yet implemented')
         sys.exit(1)
