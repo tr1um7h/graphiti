@@ -344,6 +344,8 @@ Response:
 }
 ```
 
+**注意**: CLI 层 `import_group()` 无返回值，Web API 包装层需在导入成功后查询新 group 的表记录数，构造 `table_counts` 返回给前端。
+
 #### 3.2.5 获取 Diff
 
 ```
@@ -436,6 +438,8 @@ Response:
 
 **注意**: `from_group_id` 后端默认取 patch 中的值，前端允许用户在对话框中覆盖。
 
+**注意**: CLI 层 `apply_patch()` 返回 `{added, removed, modified, conflicts, dry_run}`，Web API 包装层负责添加 `success` 字段。错误时返回 `{"success": false, "error": "..."}`。
+
 ---
 
 ## 4. 前端实现
@@ -509,23 +513,40 @@ export default function DataPageClient() {
 后端 API 实现应复用 `cli/` 目录下的核心逻辑：
 
 ```python
-# 导出
+# Export: driver → JSONL files in output_dir
 from cli.export import export_group_with_sorting
+await export_group_with_sorting(driver, group_id, schema, output_dir)
 
-# 导入
+# Import: JSONL files → database (creates new group)
 from cli.import_ import import_group
+await import_group(driver, input_dir, new_group_id, overwrite=False)
 
-# Diff
+# Diff: compare two export directories → patch dict
 from cli.diff import diff_groups
+patch = diff_groups(left_dir, right_dir)  # returns dict, not writes file
 
-# Apply
+# Apply: patch dict → database
 from cli.apply import apply_patch
+result = await apply_patch(driver, patch, from_group_id, to_group_id, strategy='ours', dry_run=False)
+# Or from file:
+from cli.apply import apply_patch_from_file
+result = await apply_patch_from_file(driver, patch_file, from_group_id, to_group_id, strategy, dry_run)
 ```
+
+**注意**：`import_group` 没有 `schema` 参数（从 `driver.schema` 读取）。`apply_patch` 接收 `patch` 字典（非文件路径），如需从文件加载请使用 `apply_patch_from_file`。
 
 ### 5.2 临时文件处理
 
 - 导出时：在服务器 `/tmp` 创建临时目录，生成 JSONL 文件，打包为 zip 后返回，然后清理
 - 导入时：接收上传的 zip 文件，解压到临时目录，处理后清理
+
+### 5.3 导出数据格式说明
+
+导出的 JSONL 文件中，边表（entity_edges, episodic_edges 等）包含额外的解析字段：
+- `source_name` / `target_name` — 解析后的节点名称（用于跨组 diff）
+- `source_content` / `target_content` — episodic 节点的内容摘要
+
+这些字段在导入时会被自动过滤（不写入数据库），仅用于 diff 业务键匹配。
 
 ---
 
@@ -638,6 +659,11 @@ test('should import patch with confirmation', async ({ page }) => {
 | Patch 应用 | 必须预览确认 | 安全性，防止误操作 |
 | 冲突策略 | 用户选择 | 灵活性 |
 | 临时文件 | /tmp + 自动清理 | 安全、整洁 |
+
+**冲突策略语义说明**：`ours`/`theirs` 遵循 Git merge 约定：
+- **Ours** — 保留目标 group（to_group_id）的现有数据，跳过冲突项的修改
+- **Theirs** — 使用 patch 中来源 group（from_group_id）的数据覆盖冲突项
+- **Skip** — 跳过整个有冲突的表，不修改任何记录
 
 ---
 
