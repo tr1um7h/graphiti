@@ -17,6 +17,14 @@ _EMBEDDING_FIELDS: frozenset[str] = frozenset({'name_embedding', 'fact_embedding
 # Fields that must never appear in export output
 _SKIP_FIELDS: frozenset[str] = frozenset({'search_vector'})
 
+# JOIN-aliased columns added in edge queries for diff purposes only
+# These are NOT part of the actual table schema and must be stripped
+# before writing JSONL (otherwise import INSERT fails)
+_JOIN_ALIAS_FIELDS: frozenset[str] = frozenset({
+    'source_name', 'target_name',
+    'source_content_hash', 'target_content_hash',
+})
+
 
 def format_embedding(vec: list[float] | None) -> list[float] | None:
     """Compress embedding vector to 6 decimal places."""
@@ -25,25 +33,49 @@ def format_embedding(vec: list[float] | None) -> list[float] | None:
     return [round(f, 6) for f in vec]
 
 
+def _json_safe(value: Any) -> Any:
+    """Convert non-JSON-safe types to JSON-safe equivalents."""
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, float):
+        # numpy floats (float32, float64) are subclasses of float but
+        # json.dumps still rejects numpy.float32 on some platforms
+        return float(value)
+    if hasattr(value, 'item'):  # numpy scalar types (int32, int64, etc.)
+        return value.item()
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
+
+
 def serialize_record(record: dict, table_name: str) -> dict:
     """Serialize a DB record for JSONL export.
 
     - Skips ``search_vector`` (GENERATED column)
     - Compresses embedding fields via :func:`format_embedding`
-    - Converts ``datetime`` objects to ISO format strings
+    - Converts all numpy types and datetimes to JSON-safe equivalents
     """
     result: dict[str, Any] = {}
 
     for key, value in record.items():
-        if key in _SKIP_FIELDS:
+        if key in _SKIP_FIELDS or key in _JOIN_ALIAS_FIELDS:
             continue
         if key in _EMBEDDING_FIELDS:
             result[key] = format_embedding(value)
-        elif isinstance(value, datetime):
-            result[key] = value.isoformat()
         else:
-            result[key] = value
+            result[key] = _json_safe(value)
     return result
+
+
+class _NumpyEncoder(json.JSONEncoder):
+    """JSON encoder that handles numpy numeric types."""
+
+    def default(self, o: Any) -> Any:
+        if hasattr(o, 'item'):  # numpy scalars
+            return o.item()
+        return super().default(o)
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +177,7 @@ async def export_group_with_sorting(
         jsonl_path = output_dir / f'{table_name}.jsonl'
         with jsonl_path.open('w', encoding='utf-8') as fh:
             for rec in serialized:
-                fh.write(json.dumps(rec) + '\n')
+                fh.write(json.dumps(rec, cls=_NumpyEncoder) + '\n')
 
         counts[table_name] = len(serialized)
 
@@ -159,4 +191,4 @@ async def export_group_with_sorting(
         'counts': counts,
     }
     metadata_path = output_dir / 'metadata.json'
-    metadata_path.write_text(json.dumps(metadata, indent=2) + '\n', encoding='utf-8')
+    metadata_path.write_text(json.dumps(metadata, indent=2, cls=_NumpyEncoder) + '\n', encoding='utf-8')

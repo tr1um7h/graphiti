@@ -21,7 +21,8 @@ FROM graphiti-base:py3.12
 # 透传 PIP_INDEX_URL/PIP_TRUSTED_HOST 给 uv（uv pip install 会自动读取 UV_INDEX_URL/UV_ALLOW_INSECURE_HOST）
 ENV UV_INDEX_URL=${PIP_INDEX_URL} \
     UV_ALLOW_INSECURE_HOST=${PIP_TRUSTED_HOST} \
-    UV_INDEX_STRATEGY=unsafe-best-match
+    UV_INDEX_STRATEGY=unsafe-best-match \
+    UV_NO_INSTALLER_METADATA=1
 
 # Inherit build arguments for labels
 ARG GRAPHITI_VERSION
@@ -44,6 +45,7 @@ WORKDIR /app
 COPY ./server/pyproject.toml ./server/README.md ./
 COPY ./server/graph_service ./graph_service
 COPY ./pyproject.toml ./README.md ./graphiti_core/
+COPY ./cli ./cli
 COPY ./graphiti_core ./graphiti_core
 
 # Install server dependencies
@@ -53,7 +55,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /app/.venv --clear && \
     . /app/.venv/bin/activate && \
     uv pip install --no-deps -e ./graphiti_core && \
-    uv pip install pydantic psycopg[binary,pool] pgvector openai neo4j tenacity numpy python-dotenv posthog uvicorn fastapi httpx pydantic-settings sentence-transformers
+    uv pip install pydantic psycopg[binary,pool] pgvector openai neo4j tenacity numpy python-dotenv posthog uvicorn fastapi httpx pydantic-settings sentence-transformers python-multipart
 
 # Change ownership to app user
 RUN chown -R app:app /app

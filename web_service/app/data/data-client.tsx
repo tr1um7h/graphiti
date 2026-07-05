@@ -17,6 +17,7 @@ export default function DataPageClient() {
   const [selectedGroup1, setSelectedGroup1] = useState<string | null>(null);
   const [selectedGroup2, setSelectedGroup2] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [importDataOpen, setImportDataOpen] = useState(false);
   const [importPatchOpen, setImportPatchOpen] = useState(false);
 
@@ -59,6 +60,29 @@ export default function DataPageClient() {
   const handleClearSelection = () => {
     setSelectedGroup1(null);
     setSelectedGroup2(null);
+  };
+
+  const handleDelete = async (groupId: string) => {
+    if (!confirm(`Delete group "${groupId}"? This cannot be undone.`)) return;
+    setDeleting(groupId);
+    try {
+      const res = await fetch(`/api/data/groups/${encodeURIComponent(groupId)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Delete failed' }));
+        throw new Error(err.error || err.detail || 'Delete failed');
+      }
+      // Clear selection if the deleted group was selected
+      if (selectedGroup1 === groupId) setSelectedGroup1(null);
+      if (selectedGroup2 === groupId) setSelectedGroup2(null);
+      fetchGroups();
+    } catch (error) {
+      console.error('Delete failed:', error);
+      alert(error instanceof Error ? error.message : 'Delete failed');
+    } finally {
+      setDeleting(null);
+    }
   };
 
   const handleImported = () => {
@@ -160,7 +184,7 @@ export default function DataPageClient() {
           Loading groups...
         </div>
       ) : mode === 'list' ? (
-        <GroupsTable groups={groups} onSelect={handleSelectGroup} />
+        <GroupsTable groups={groups} onSelect={handleSelectGroup} onDelete={handleDelete} deleting={deleting} />
       ) : mode === 'single' ? (
         <GroupDetail groupId={selectedGroup1!} />
       ) : (

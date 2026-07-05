@@ -484,3 +484,18 @@ async def apply_patch_endpoint(
         print(f'❌ Error in apply_patch_endpoint: {e}', flush=True)
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete('/data/groups/{group_id}', status_code=status.HTTP_200_OK)
+async def delete_group(group_id: str, graphiti: ZepGraphitiDep):
+    """
+    Delete a group and all its data.
+    """
+    try:
+        await graphiti.delete_group(group_id)
+        return {'success': True, 'message': f"Group '{group_id}' deleted"}
+    except Exception as e:
+        import traceback
+        print(f'❌ Error in delete_group: {e}', flush=True)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

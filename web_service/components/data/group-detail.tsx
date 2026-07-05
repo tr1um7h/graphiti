@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { GroupDetail as GroupDetailType } from '@/lib/types';
@@ -147,9 +147,8 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
                 const isExpanded = expandedTable === tableName;
 
                 return (
-                  <>
+                  <Fragment key={tableName}>
                     <tr
-                      key={tableName}
                       className="border-b last:border-0 hover:bg-muted/30"
                     >
                       <td className="px-4 py-3">
@@ -256,7 +255,7 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
             </tbody>

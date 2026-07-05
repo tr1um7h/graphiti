@@ -402,14 +402,14 @@ graphiti-cli apply \
 - Create: `tests/cli/__init__.py`
 - Modify: `pyproject.toml` (add CLI entry point)
 
-- [ ] **Step 1: Create CLI package structure**
+- [x] **Step 1: Create CLI package structure**
 
 ```bash
 mkdir -p cli tests/cli
 touch cli/__init__.py tests/cli/__init__.py
 ```
 
-- [ ] **Step 2: Create basic CLI entry point**
+- [x] **Step 2: Create basic CLI entry point**
 
 ```python
 # cli/main.py
@@ -474,14 +474,14 @@ if __name__ == '__main__':
     main()
 ```
 
-- [ ] **Step 3: Add CLI entry point to pyproject.toml**
+- [x] **Step 3: Add CLI entry point to pyproject.toml**
 
 ```toml
 # Add to [project.scripts] section
 graphiti-cli = "cli.main:main"
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add cli/ tests/cli/ pyproject.toml
@@ -496,7 +496,7 @@ git commit -m "feat: add CLI package structure with argparse skeleton"
 - Create: `cli/remap.py`
 - Create: `tests/cli/test_remap.py`
 
-- [ ] **Step 1: Write failing test for UUID mapping generation**
+- [x] **Step 1: Write failing test for UUID mapping generation**
 
 ```python
 # tests/cli/test_remap.py
@@ -521,7 +521,7 @@ def test_generate_uuid_mappings(tmp_path):
     assert uuid_map["old-uuid-2"] != "old-uuid-2"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pytest tests/cli/test_remap.py::test_generate_uuid_mappings -v
@@ -529,7 +529,7 @@ pytest tests/cli/test_remap.py::test_generate_uuid_mappings -v
 
 Expected: FAIL with "ModuleNotFoundError: No module named 'cli.remap'"
 
-- [ ] **Step 3: Implement generate_uuid_mappings**
+- [x] **Step 3: Implement generate_uuid_mappings**
 
 ```python
 # cli/remap.py
@@ -552,7 +552,7 @@ def generate_uuid_mappings(jsonl_files: list[Path]) -> dict[str, str]:
     return uuid_map
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pytest tests/cli/test_remap.py::test_generate_uuid_mappings -v
@@ -560,7 +560,7 @@ pytest tests/cli/test_remap.py::test_generate_uuid_mappings -v
 
 Expected: PASS
 
-- [ ] **Step 5: Write failing test for record remapping**
+- [x] **Step 5: Write failing test for record remapping**
 
 ```python
 # tests/cli/test_remap.py
@@ -640,7 +640,7 @@ def test_remap_episodic_node():
     assert remapped["entity_edges"] == ["new-edge1-uuid", "new-edge2-uuid"]
 ```
 
-- [ ] **Step 6: Run tests to verify they fail**
+- [x] **Step 6: Run tests to verify they fail**
 
 ```bash
 pytest tests/cli/test_remap.py -v
@@ -648,7 +648,7 @@ pytest tests/cli/test_remap.py -v
 
 Expected: FAIL with "ImportError: cannot import name 'remap_entity_node'"
 
-- [ ] **Step 7: Implement remap functions**
+- [x] **Step 7: Implement remap functions**
 
 ```python
 # cli/remap.py (add to existing file)
@@ -744,7 +744,7 @@ def remap_next_episode_edge(record: dict, uuid_map: dict, new_group_id: str) -> 
     return remapped
 ```
 
-- [ ] **Step 8: Run tests to verify they pass**
+- [x] **Step 8: Run tests to verify they pass**
 
 ```bash
 pytest tests/cli/test_remap.py -v
@@ -752,7 +752,7 @@ pytest tests/cli/test_remap.py -v
 
 Expected: All tests PASS
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add cli/remap.py tests/cli/test_remap.py
@@ -767,7 +767,7 @@ git commit -m "feat: implement UUID remapping core with two-phase approach"
 - Create: `cli/export.py`
 - Create: `tests/cli/test_export.py`
 
-- [ ] **Step 1: Write failing test for export**
+- [x] **Step 1: Write failing test for export**
 
 ```python
 # tests/cli/test_export.py
@@ -844,7 +844,7 @@ def test_export_group_creates_jsonl_files(tmp_path):
     assert record["uuid"] == "e1"
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pytest tests/cli/test_export.py -v
@@ -852,7 +852,7 @@ pytest tests/cli/test_export.py -v
 
 Expected: FAIL with "ModuleNotFoundError: No module named 'cli.export'"
 
-- [ ] **Step 3: Implement export functions**
+- [x] **Step 3: Implement export functions**
 
 ```python
 # cli/export.py
@@ -930,7 +930,7 @@ async def export_group(driver, group_id: str, schema: str, output_dir: Path):
     return metadata
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pytest tests/cli/test_export.py::test_export_group_creates_jsonl_files -v
@@ -938,7 +938,7 @@ pytest tests/cli/test_export.py::test_export_group_creates_jsonl_files -v
 
 Expected: PASS
 
-- [ ] **Step 5: Implement sorting with JOINs for edge tables**
+- [x] **Step 5: Implement sorting with JOINs for edge tables**
 
 Add to `cli/export.py`:
 
@@ -1027,7 +1027,7 @@ def write_jsonl(path: Path, records: list[dict]):
             f.write(json.dumps(serialized) + '\n')
 ```
 
-- [ ] **Step 6: Wire export command in main.py**
+- [x] **Step 6: Wire export command in main.py**
 
 ```python
 # cli/main.py (update export section)
@@ -1043,7 +1043,7 @@ if args.command == 'export':
         await driver.close()
 ```
 
-- [ ] **Step 7: Run all export tests**
+- [x] **Step 7: Run all export tests**
 
 ```bash
 pytest tests/cli/test_export.py -v
@@ -1051,7 +1051,7 @@ pytest tests/cli/test_export.py -v
 
 Expected: All tests PASS
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add cli/export.py tests/cli/test_export.py cli/main.py
@@ -1066,7 +1066,7 @@ git commit -m "feat: implement export with business key sorting"
 - Create: `cli/import_.py`
 - Create: `tests/cli/test_import.py`
 
-- [ ] **Step 1: Write failing test for import**
+- [x] **Step 1: Write failing test for import**
 
 ```python
 # tests/cli/test_import.py
@@ -1146,7 +1146,7 @@ def test_import_fails_when_group_exists(tmp_path):
         import_group(mock_driver, export_dir, "xyz", overwrite=False)
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 ```bash
 pytest tests/cli/test_import.py -v
@@ -1154,7 +1154,7 @@ pytest tests/cli/test_import.py -v
 
 Expected: FAIL with "ModuleNotFoundError: No module named 'cli.import_'"
 
-- [ ] **Step 3: Implement import functions**
+- [x] **Step 3: Implement import functions**
 
 ```python
 # cli/import_.py
@@ -1286,7 +1286,7 @@ async def insert_record(driver, table_name: str, record: dict):
     await driver.execute_query(query, params=record)
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 ```bash
 pytest tests/cli/test_import.py -v
@@ -1294,7 +1294,7 @@ pytest tests/cli/test_import.py -v
 
 Expected: All tests PASS
 
-- [ ] **Step 5: Wire import command in main.py**
+- [x] **Step 5: Wire import command in main.py**
 
 ```python
 # cli/main.py (update import section)
@@ -1310,7 +1310,7 @@ elif args.command == 'import':
         await driver.close()
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/import_.py tests/cli/test_import.py cli/main.py
@@ -1325,7 +1325,7 @@ git commit -m "feat: implement import with UUID remapping and AGE projection reb
 - Create: `cli/diff.py`
 - Create: `tests/cli/test_diff.py`
 
-- [ ] **Step 1: Write failing test for diff**
+- [x] **Step 1: Write failing test for diff**
 
 ```python
 # tests/cli/test_diff.py
@@ -1390,7 +1390,7 @@ def test_diff_groups_finds_differences(tmp_path):
     assert 'summary' in entity_changes['modified'][0]['fields']
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 ```bash
 pytest tests/cli/test_diff.py -v
@@ -1398,7 +1398,7 @@ pytest tests/cli/test_diff.py -v
 
 Expected: FAIL with "ModuleNotFoundError: No module named 'cli.diff'"
 
-- [ ] **Step 3: Implement diff functions**
+- [x] **Step 3: Implement diff functions**
 
 ```python
 # cli/diff.py
@@ -1540,7 +1540,7 @@ def diff_groups(left_dir: Path, right_dir: Path) -> dict:
     return patch
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 ```bash
 pytest tests/cli/test_diff.py::test_diff_groups_finds_differences -v
@@ -1548,7 +1548,7 @@ pytest tests/cli/test_diff.py::test_diff_groups_finds_differences -v
 
 Expected: PASS
 
-- [ ] **Step 5: Wire diff command in main.py**
+- [x] **Step 5: Wire diff command in main.py**
 
 ```python
 # cli/main.py (update diff section)
@@ -1570,7 +1570,7 @@ elif args.command == 'diff':
         print(f"HTML report written to {args.html_output}")
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add cli/diff.py tests/cli/test_diff.py cli/main.py
@@ -1585,7 +1585,7 @@ git commit -m "feat: implement semantic diff with business key matching"
 - Create: `cli/apply.py`
 - Create: `tests/cli/test_apply.py`
 
-- [ ] **Step 1: Write failing test for apply**
+- [x] **Step 1: Write failing test for apply**
 
 ```python
 # tests/cli/test_apply.py
@@ -1657,7 +1657,7 @@ def test_apply_patch_dry_run(tmp_path):
     assert result['added'] == 1
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 ```bash
 pytest tests/cli/test_apply.py -v
@@ -1665,7 +1665,7 @@ pytest tests/cli/test_apply.py -v
 
 Expected: FAIL
 
-- [ ] **Step 3: Implement apply functions**
+- [x] **Step 3: Implement apply functions**
 
 ```python
 # cli/apply.py
@@ -1735,7 +1735,7 @@ async def load_group_data(driver, group_id: str) -> dict:
 # ... implement insert_added_record, delete_record_by_business_key, etc.
 ```
 
-- [ ] **Step 4: Wire apply command in main.py**
+- [x] **Step 4: Wire apply command in main.py**
 
 ```python
 # cli/main.py (update apply section)
@@ -1753,7 +1753,7 @@ elif args.command == 'apply':
         await driver.close()
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add cli/apply.py tests/cli/test_apply.py cli/main.py
@@ -1762,12 +1762,18 @@ git commit -m "feat: implement patch apply with conflict resolution"
 
 ---
 
-### Task 7: Integration Tests
+### Task 7: E2E Tests + Production Fixes
 
 **Files:**
-- Create: `tests/cli/test_integration.py`
+- Create: `tests/cli/test_e2e.py` (end-to-end workflow test)
+- Create: `web_service/e2e/data.spec.ts` (Playwright E2E for Data UI)
+- Modify: `cli/export.py` (numpy type handling, join alias filtering)
+- Modify: `cli/import_.py` (jsonb dict serialization)
+- Modify: `Dockerfile` (UV_NO_INSTALLER_METADATA, cli copy, python-multipart)
 
-- [ ] **Step 1: Write integration test for full workflow**
+> **Note:** This task expanded beyond the original scope. During implementation, production hardening fixes were discovered and applied: numpy type serialization in export, jsonb compatibility in import, Dockerfile missing deps, and a full Playwright E2E test suite for the Data frontend.
+
+- [x] **Step 1: Write E2E test for full CLI workflow**
 
 ```python
 # tests/cli/test_integration.py
@@ -1825,7 +1831,14 @@ async def test_full_export_import_diff_workflow(tmp_path):
     print("Integration test passed: export → import workflow")
 ```
 
-- [ ] **Step 2: Run integration test**
+**Also added Playwright E2E tests** in `web_service/e2e/data.spec.ts` covering:
+- Groups list display
+- Group detail view
+- Diff between two groups
+- Import data dialog
+- Import patch dialog workflow
+
+- [x] **Step 2: Run E2E test**
 
 ```bash
 pytest tests/cli/test_integration.py -v -s
@@ -1833,11 +1846,11 @@ pytest tests/cli/test_integration.py -v -s
 
 Expected: PASS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
-git add tests/cli/test_integration.py
-git commit -m "test: add integration test for export-import workflow"
+git add tests/cli/test_e2e.py web_service/e2e/data.spec.ts
+git commit -m "test: add E2E tests for CLI full workflow and Data UI"
 ```
 
 ---
@@ -1851,8 +1864,9 @@ git commit -m "test: add integration test for export-import workflow"
 - `test_diff.py`: Business key matching, field comparison
 - `test_apply.py`: Patch application, conflict resolution
 
-### Integration Tests
-- `test_integration.py`: Full export → import → diff workflow
+### Integration / E2E Tests
+- `test_e2e.py`: Full CLI export → import → diff → apply workflow
+- `web_service/e2e/data.spec.ts`: Playwright E2E for Data frontend UI
 
 ### Test Execution
 
@@ -1887,10 +1901,53 @@ No new dependencies required. Uses existing:
 - [x] Task 4: Import Implementation (import_.py)
 - [x] Task 5: Diff Implementation (diff.py)
 - [x] Task 6: Apply Implementation (apply.py)
-- [x] Task 7: Integration Tests
+- [x] Task 7: E2E Tests + Production Fixes
 
 **Total Estimated Tasks:** 7
 **Dependencies Between Tasks:** Task 2 (remap) → Tasks 3, 4, 6 (export, import, apply)
+
+---
+
+## Production Deviations (Actual vs Planned)
+
+The following changes were added during implementation beyond the original plan:
+
+### 1. CLI Export Production Hardening
+
+**`cli/export.py`** — Added:
+
+- `_JOIN_ALIAS_FIELDS` — Filters out JOIN-aliased columns (`source_name`, `target_name`, `source_content_hash`, `target_content_hash`) from JSONL output. These columns are added by edge table JOIN queries for diff business key matching but are NOT part of the actual table schema. Without this filter, import INSERT fails.
+- `_json_safe()` — Recursive converter for numpy types (`float32`, `int64`, etc.) and datetimes to JSON-safe equivalents. `json.dumps` rejects numpy types on some platforms.
+- `_NumpyEncoder` — Custom `json.JSONEncoder` subclass for numpy scalar fallback handling.
+
+### 2. CLI Import Production Hardening
+
+**`cli/import_.py`** — Added:
+
+- `_jsonify_values()` — Serializes Python `dict` values to JSON strings for psycopg jsonb column compatibility. Lists are left as-is (handled natively for ARRAY columns and pgvector).
+
+### 3. Dockerfile Updates
+
+- `UV_NO_INSTALLER_METADATA=1` — Environment flag for uv compatibility
+- Copy `./cli` directory into image (was missing, causing import errors at runtime)
+- Install `python-multipart` dependency (required by FastAPI file upload endpoints)
+
+### 4. Group Deletion (Not in Original Plan)
+
+**Backend:** Added `DELETE /rest/data/groups/{group_id}` endpoint in `server/graph_service/routers/data.py` that calls `graphiti.delete_group()`.
+
+**Frontend:** Added delete button with confirmation dialog in `groups-table.tsx`, with loading state (`deleting` prop) and error handling. Selection is cleared if the deleted group was selected.
+
+### 5. Frontend Polish
+
+- **React key warning fix:** Replaced `<>` fragment with `<Fragment key={tableName}>` in `group-detail.tsx`
+- **Responsive breakpoint:** Changed sidebar from `lg:hidden` to `md:hidden` for better tablet support
+- **UI text:** Group list empty state uses Chinese locale (\"暂无分组\")
+- **Action icons:** View button uses Eye icon; delete button uses Trash2 icon with `text-destructive` styling
+
+### 6. Server Tests Location
+
+Server API tests are at `server/tests/test_data_api.py` (not `tests/server/test_data_api.py`), matching the project convention of co-locating tests with their package.
 
 ---
 

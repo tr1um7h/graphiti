@@ -61,6 +61,12 @@ def _read_metadata(input_dir: Path) -> dict:
     return json.loads(metadata_path.read_text(encoding='utf-8'))
 
 
+def _jsonify_values(record: dict) -> dict:
+    """Serialize dict values to JSON strings for psycopg jsonb compatibility.
+    Lists are left as-is (handled natively for ARRAY columns and pgvector)."""
+    return {k: json.dumps(v) if isinstance(v, dict) else v for k, v in record.items()}
+
+
 def _build_insert_sql(schema: str, table_name: str, columns: list[str]) -> str:
     """Build an UPSERT SQL statement for the given table and columns.
 
@@ -175,8 +181,9 @@ async def import_group(
             # Remap the record
             remapped = remap_fn(record, uuid_map, new_group_id)
 
-            # Filter out GENERATED fields
+            # Filter out GENERATED fields and JSONify dict/list values
             filtered = {k: v for k, v in remapped.items() if k not in _GENERATED_FIELDS}
+            filtered = _jsonify_values(filtered)
 
             # Build SQL on first record (columns are consistent across records)
             if columns is None:

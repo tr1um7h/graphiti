@@ -78,12 +78,12 @@ export function Sidebar() {
   return (
     <>
       {/* Desktop sidebar */}
-      <aside className="hidden lg:flex h-screen w-48 flex-col border-r bg-background">
+      <aside className="hidden md:flex h-screen w-48 flex-col border-r bg-background">
         <SidebarContent />
       </aside>
 
       {/* Mobile sidebar */}
-      <div className="lg:hidden fixed top-0 left-0 z-40 p-2">
+      <div className="md:hidden fixed top-0 left-0 z-40 p-2">
         <Sheet>
           <SheetTrigger
             render={(props) => (
