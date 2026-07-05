@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["graphiti_core"]
+packages = ["graphiti_core", "cli"]
 
 [project.urls]
 Homepage = "https://help.getzep.com/graphiti/graphiti/overview"

@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -82,8 +83,27 @@ async def handle_command(args):
         finally:
             await driver.close()
     elif args.command == 'diff':
-        print('Diff command not yet implemented')
-        sys.exit(1)
+        from cli.diff import diff_groups
+
+        left_path = Path(args.left_dir)
+        right_path = Path(args.right_dir)
+
+        if not left_path.is_dir():
+            print(f'Left directory does not exist: {left_path}', file=sys.stderr)
+            sys.exit(1)
+        if not right_path.is_dir():
+            print(f'Right directory does not exist: {right_path}', file=sys.stderr)
+            sys.exit(1)
+
+        patch = diff_groups(left_path, right_path)
+
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(patch, indent=2, default=str) + '\n', encoding='utf-8')
+        print(f'Patch written to {output_path}')
+
+        if args.html_output:
+            print(f'HTML report not yet implemented: {args.html_output}')
     elif args.command == 'apply':
         print('Apply command not yet implemented')
         sys.exit(1)
