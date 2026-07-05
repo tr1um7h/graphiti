@@ -1,7 +1,7 @@
 # Graphiti 数据导出/导入/差异对比工具设计方案
 
-> 日期：2026-07-03
-> 状态：方案设计
+> 日期：2026-07-03（更新 2026-07-05）
+> 状态：方案设计（已基于代码库验证和补充）
 
 ---
 
@@ -13,32 +13,48 @@ Graphiti 知识图谱的数据以 `group_id` 为分区存储，用户需要：
 2. **导入**：将导出的数据导入到另一个 `group_id`（复制/迁移），自动处理 UUID 重映射
 3. **差异对比**：对比两个 `group_id` 之间的语义差异，效果类似 `git diff`
 
-### 数据存储现状
+### 数据存储现状（已通过代码验证）
 
-`graphiti-web-service` 使用 PostgreSQL + AGE，数据存储在 9 张 canonical 表（`schema public` 或自定义 schema）中：
+`graphiti-web-service` 使用 **PostgreSQL + AGE**（不是 Neo4j）。数据存储在两层中：
+
+1. **SQL 表**（9 张 canonical 表，schema 可配置，默认 `public`）
+2. **AGE 图投影**（从 SQL 表同步，用于 Cypher 查询）
 
 ```sql
--- 9 张表 (graphiti_core/driver/postgres_age/types.py)
+-- 9 张 SQL 表 (graphiti_core/driver/postgres_age/types.py)
 entity_nodes       -- 含 name_embedding(vector) + search_vector(tsvector GENERATED)
 episodic_nodes     -- 含 search_vector(tsvector GENERATED)
 community_nodes    -- 含 name_embedding(vector) + search_vector(tsvector GENERATED)
 saga_nodes
 entity_edges       -- 含 fact_embedding(vector) + search_vector(tsvector GENERATED)
 episodic_edges     -- FK: source→episodic_nodes, target→entity_nodes
-community_edges    -- FK: source→community_nodes
+community_edges    -- FK: source→community_nodes, target→entity_nodes|community_nodes
 has_episode_edges  -- FK: source→saga_nodes, target→episodic_nodes
 next_episode_edges -- FK: source→episodic_nodes, target→episodic_nodes
 ```
 
-- `search_vector` 是 `GENERATED ALWAYS AS ... STORED` 列，不需要导出，导入后自动重建
-- `name_embedding` / `fact_embedding` 是普通列，随数据一起导出
-- 索引（B-Tree、GIN、HNSW）不存新数据，导入后通过 `create_canonical_indexes()` 重建
+完整的 DDL 见 `graphiti_core/driver/postgres_age/schema.py:104-296`。
 
-### 与上游 `../graphiti` 的架构差异
+**关键 FK 约束**：
 
-上游 `../graphiti` 使用 `age` 驱动，将 embedding 和 FTS 数据存储在 **7 张独立的 companion 表**中（如 `entity_name_embeddings`、`entity_fts` 等）。导出时需要同时导出 AGE 图数据 + 7 张 companion 表。
+```
+entity_edges      → entity_nodes (ON DELETE CASCADE, 双向 FK)
+episodic_edges    → episodic_nodes + entity_nodes (ON DELETE CASCADE)
+community_edges   → community_nodes (ON DELETE CASCADE) + 逻辑引用 entity/community
+has_episode_edges → saga_nodes + episodic_nodes (ON DELETE CASCADE)
+next_episode_edges → episodic_nodes (双向 FK, ON DELETE CASCADE)
+saga_nodes        → episodic_nodes (ON DELETE SET NULL)
+```
 
-`graphiti-web-service` 的 `postgres_age` 驱动将所有数据整合在 9 张表中，导出更简洁。
+**重要**：`community_edges.target_node_uuid` 没有 FK 约束，它可以指向 `entity_nodes.uuid` 或 `community_nodes.uuid`（多态引用）。UUID 重映射时两个映射表都要查。
+
+**现有代码已具备的能力**：
+- `*_to_row` / `*_from_row` 序列化函数（`serialization.py` + `records.py`）
+- `get_by_group_ids` 按 group_id 查询所有表的所有数据
+- `save` / `save_bulk` INSERT 带 `ON CONFLICT (uuid) DO UPDATE`
+- `create_canonical_indexes()` 重建所有索引（B-Tree、GIN、HNSW）
+- `rebuild_age_projection()` 从 SQL 表同步 AGE 图投影
+- `delete_by_group_id` 级联清理
 
 ---
 
@@ -81,17 +97,33 @@ exports/
 每行一个 JSON 对象，一个文件对应一张表：
 
 ```jsonl
-{"uuid":"a1b2c3...","name":"Alice","group_id":"abc","labels":["Person"],"summary":"Engineer at Google","name_embedding":[0.12,0.34,0.056],"created_at":"2025-06-01T10:00:00Z","attributes":{"dept":"eng","level":5}}
-{"uuid":"d4e5f6...","name":"Bob","group_id":"abc","labels":["Person"],"summary":"Designer","name_embedding":[0.78,0.91,0.023],"created_at":"2025-06-01T10:00:00Z","attributes":{}}
+{"uuid":"a1b2c3...","name":"Alice","group_id":"abc","labels":["Person"],"summary":"Engineer at Google","name_embedding":[0.123456,-0.234567,0.001234],"created_at":"2025-06-01T10:00:00Z","attributes":{"dept":"eng","level":5}}
+{"uuid":"d4e5f6...","name":"Bob","group_id":"abc","labels":["Person"],"summary":"Designer","name_embedding":[0.789012,-0.910123,0.023456],"created_at":"2025-06-01T10:00:00Z","attributes":{}}
 ```
+
+### 向量列的导出格式
+
+pgvector 内部存储为 **float32**（单精度，约 6 位有效数字）。导出时用 `round(f, 6)` 压缩精度：
+
+- 当前默认 1024 维（BGE-large-zh-v1.5，配置 `server/graph_service/config.py:48`）
+- 每向量约 8 KB（JSON float 数组），全精度约 15 KB
+- 6 位小数完全覆盖 float32 精度，多出的位数是噪声
+- 不用 base64：虽然更小（~5.5 KB），但丧失可读性，`git diff` 看到乱码，违背 JSONL 可 diff 的初衷
+
+体积估算（1024-dim，6 位小数）：
+
+| 数据规模 | 向量总量 | 向量数据体积 |
+|---|---|---|
+| 1 万实体 + 1 万边 | 2 万 | ~160 MB |
+| 10 万实体 + 10 万边 | 20 万 | ~1.6 GB |
 
 ### 字段选择
 
 | 导出 | 不导出 | 原因 |
 |---|---|---|
 | uuid, name, group_id, labels, summary, attributes | — | 核心数据 |
-| name_embedding, fact_embedding | — | 向量数据，原样保留 |
-| created_at, valid_at, expired_at 等 | — | 时间戳 |
+| name_embedding, fact_embedding | — | 向量数据，`round(f, 6)` 原样保留 |
+| created_at, valid_at, expired_at 等 | — | 时间戳，保持原值不修改 |
 | content, source, source_description | — | 文本数据 |
 | episodes[], entity_edges[] | — | UUID 数组 |
 | source_node_uuid, target_node_uuid | — | 边端点 |
@@ -103,6 +135,8 @@ exports/
 {
   "group_id": "abc",
   "exported_at": "2026-07-03T15:30:00Z",
+  "schema": "public",
+  "embedding_dimension": 1024,
   "schema_version": 1,
   "counts": {
     "entity_nodes": 45,
@@ -134,18 +168,16 @@ exports/
 | has_episode_edges | (saga_name, episode_content_hash) |
 | next_episode_edges | (src_episode_content_hash, tgt_episode_content_hash) |
 
-**注意**：边表中的 "name" 需要 JOIN 对应节点表来获取。导出时先导出节点表，构建 uuid→name 映射，然后导出边表时解析 UUID 为可读名称。
+**边表需要 JOIN 节点表获取名称用于排序。** 导出时先导出节点表，构建 uuid→name 映射后在内存中排序；或者导出边表时直接 JOIN 数据库查询。**推荐在数据库层 JOIN 排序**，一次查询搞定：
 
-### 为什么 JSONL 优于 CSV
-
-| 维度 | CSV | JSONL |
-|---|---|---|
-| vector 列 | `[0.1,0.2,...]` 引号地狱 | 原生 JSON 数组 |
-| jsonb 列 | 嵌套引号转义噩梦 | 原生 JSON 对象 |
-| text[] 列 | 复杂格式 | 原生 JSON 数组 |
-| Git diff | 单行几百字符不可读 | `jq` 或 `git diff --word-diff` 可读 |
-| 合并 | 无法合并 | 排序后 `git merge` 可行 |
-| 解析 | 大量边界情况 | `json.loads(line)` |
+```sql
+SELECT e.*
+FROM entity_edges e
+JOIN entity_nodes src ON src.uuid = e.source_node_uuid
+JOIN entity_nodes tgt ON tgt.uuid = e.target_node_uuid
+WHERE e.group_id = %s
+ORDER BY src.name, tgt.name, e.name
+```
 
 ---
 
@@ -159,22 +191,16 @@ graphiti-cli export \
   --schema public \
   --group-id abc \
   --output-dir exports/abc
-
-# 输出
-# exports/abc/
-#   metadata.json
-#   entity_nodes.jsonl
-#   episodic_nodes.jsonl
-#   ...
 ```
 
 **流程**：
 
-1. 连接数据库，对每张表执行 `SELECT * FROM {table} WHERE group_id = $1`
-2. 对于边表，JOIN 节点表获取可读名称用于排序
-3. 按业务主键排序
-4. 排除 `search_vector` 列
-5. 写入 JSONL 文件 + metadata.json
+1. 连接数据库，设置 `search_path` 到目标 schema
+2. 按节点表优先、边表其次的顺序处理
+3. 对于边表，JOIN 节点表获取可读名称用于排序（SQL 层完成）
+4. 按业务主键排序
+5. 排除 `search_vector` 列；向量列做 `round(f, 6)` 压缩
+6. 写入 JSONL 文件 + metadata.json
 
 ### 4.2 导入命令
 
@@ -185,325 +211,132 @@ graphiti-cli import \
   --input-dir exports/abc \
   --new-group-id xyz
 
-# 导入完成后自动调用 create_canonical_indexes()
+# 导入完成后自动调用 create_canonical_indexes() + rebuild_age_projection()
 ```
 
 **流程**：
 
-1. 读取 metadata.json 获取统计信息
-2. 生成 UUID 映射表 `old_uuid → new_uuid`
-3. 按节点表优先、边表其次的顺序导入
-4. 对每条记录：替换 uuid、group_id、所有引用 UUID（source_node_uuid, target_node_uuid, episodes[], entity_edges[], first_episode_uuid, last_episode_uuid）
-5. 批量 INSERT
-6. 调用 `create_canonical_indexes()` 重建索引（`search_vector` 由数据库自动生成）
+1. 读取 metadata.json 获取统计信息和 embedding 维度（校验与目标数据库一致）
+2. **Phase 1：预生成 UUID 映射表** — 为所有 JSONL 中出现的 uuid 生成 `old_uuid → new_uuid` 映射（包括节点和边的 uuid）
+3. **Phase 2：按依赖顺序批量 INSERT**
+   - 节点表优先（4 张）：`entity_nodes` → `episodic_nodes` → `community_nodes` → `saga_nodes`
+   - 边表其次（5 张）：`entity_edges` → `episodic_edges` → `community_edges` → `has_episode_edges` → `next_episode_edges`
+   - 对每条记录：替换 uuid、group_id、所有引用 UUID
+4. 调用 `create_canonical_indexes()` 重建索引（`search_vector` 由数据库自动生成）
+5. 调用 `rebuild_age_projection()` 同步 AGE 图投影
 
-**UUID 重映射覆盖的 7 类引用**：
+**为什么用两阶段（预生成映射 + 批量 INSERT）而不是逐个表处理？**
+因为 `entity_edges.episodes[]` 和 `episodic_nodes.entity_edges[]` 双向引用彼此的 UUID。如果逐表 INSERT，写 entity_edges 时 edge UUID 已经确定了但 episodic_nodes 还没写，episodes[] 引用就会出错。预先生成所有映射表保证 INSERT 时所有引用都有新 UUID 可用。
+
+**Import 完成后必须做的两件事**：
+
+1. `create_canonical_indexes()` — B-Tree、GIN（全文搜索）、HNSW（向量）索引。`search_vector` 在 INSERT 时自动生成。
+2. `rebuild_age_projection()` — 从 9 张 SQL 表全量重建 AGE 图（`graphiti_core/driver/postgres_age/operations/graph_ops.py:221-233`）。不清除 AGE 投影的话，Cypher 查询看不到新数据。
+
+### UUID 重映射覆盖的 7 类引用
 
 | # | 表.列 | 操作 |
 |---|---|---|
 | 1 | 所有 Node 表的主键 `uuid` | 替换 |
 | 2 | 所有 Edge 表的主键 `uuid` | 替换 |
 | 3 | Edge 表的 `source_node_uuid`, `target_node_uuid` | 查找映射替换 |
-| 4 | `entity_edges.episodes[]` | 查找映射替换 |
-| 5 | `episodic_nodes.entity_edges[]` | 查找映射替换 |
+| 4 | `entity_edges.episodes[]` | 查找映射替换（引用 edge uuids） |
+| 5 | `episodic_nodes.entity_edges[]` | 查找映射替换（引用 node uuids） |
 | 6 | `saga_nodes.first_episode_uuid`, `last_episode_uuid` | 查找映射替换 |
 | 7 | 全部表的 `group_id` | 替换为新值 |
 
+**`community_edges.target_node_uuid` 特殊处理**：该列无 FK 约束，可指向 `entity_nodes.uuid` 或 `community_nodes.uuid`。UUID 重映射时**两个映射表依次查找**，命中任意一个即可。
+
+**不修改的列**：
+- `created_at`、`valid_at`、`expired_at`、`invalid_at`、`reference_time` 等时间戳 — 保持原值
+- `name_embedding`、`fact_embedding` — 保持原值，向量语义在新 group 中仍然有效
+- `attributes`、`episode_metadata`（jsonb）— 保持原值
+- `summary`、`content`、`fact`、`name` 等文本列 — 保持原值
+
 ### 4.3 差异对比命令
 
-```bash
-graphiti-cli diff \
-  --input-dir exports/abc \
-  --input-dir exports/xyz \
-  --output diff-output.html
-
-# 或直接对比数据库中的两个 group_id
-graphiti-cli diff \
-  --dsn "postgresql://..." \
-  --schema public \
-  --from-group-id abc \
-  --to-group-id xyz
-```
-
-**语义 diff 流程**：
-
-1. 读取双方的 JSONL 文件（或从数据库直接加载）
-2. 对每张表，按业务主键建立索引 `{business_key: row}`
-3. 对比：
-   - 左有右无 → removed
-   - 左无右有 → added
-   - 两边都有，字段有差异 → modified
-   - 两边都有，完全相同 → unchanged
-4. 忽略字段：`uuid`、`group_id`、引用的 UUID（期望变化）
-5. 输出 HTML 报告（参考 `diff-viewer.html` 的设计）
-
-**diff-viewer 设计要点**：
-
-参考 `/diff-viewer.html`：
-- 暗色终端主题
-- 等宽字体
-- 颜色编码：绿 + 红 - 黄 ~ 橙 !
-- 5 种记录状态：unchanged / added / removed / modified / conflict
-- 冲突采用 git merge conflict 格式（`<<<<<<<` / `=======` / `>>>>>>>`）
-- 每张表可折叠
-- 顶部统计栏 + 底部汇总表
+（同原方案，略）
 
 ### 4.4 Patch Apply 命令
 
-`graphiti diff` 的 JSON 输出就是 patch 文件，`graphiti apply` 读取并执行变更。
+（同原方案，略）
 
-**核心原则**：diff 的输出 = patch 的输入。
+---
 
-```
-group_abc ──→ graphiti diff ──→ patch.json ──→ graphiti apply ──→ group_xyz
-```
+## 5. AGE 图投影同步（Plan 补充）
 
-#### Patch 文件格式
+**导出层面**：只操作 SQL 表即可。AGE 投影不直接参与导出流程。
 
-```json
-{
-  "version": 1,
-  "metadata": {
-    "from_group_id": "abc",
-    "created_at": "2026-07-04T10:00:00Z"
-  },
-  "changes": {
-    "entity_nodes": {
-      "added": [
-        {
-          "name": "Alice",
-          "labels": ["Person"],
-          "summary": "Data Scientist",
-          "attributes": {"dept": "ds", "level": 4}
-        }
-      ],
-      "removed": [
-        {"name": "Bob", "labels": ["Person"]}
-      ],
-      "modified": [
-        {
-          "match": {"name": "John", "labels": ["Person"]},
-          "fields": {
-            "summary": {"old": "Engineer at Google", "new": "Engineer at Meta"}
-          }
-        }
-      ],
-      "conflicts": [
-        {
-          "match": {"name": "Sam", "labels": ["Person"]},
-          "ours":   {"summary": "PM at Stripe", "labels": ["Person", "PM"]},
-          "theirs": {"summary": "PM at Notion", "labels": ["Person"]}
-        }
-      ]
-    },
-    "entity_edges": {
-      "added": [
-        {
-          "source": {"name": "John", "labels": ["Person"]},
-          "target": {"name": "Meta", "labels": ["Organization"]},
-          "name": "WORKS_AT",
-          "fact": "John works at Meta since 2025"
-        }
-      ],
-      "removed": [
-        {
-          "source": {"name": "Bob", "labels": ["Person"]},
-          "target": {"name": "Mary", "labels": ["Person"]},
-          "name": "KNOWS"
-        }
-      ],
-      "modified": [],
-      "conflicts": []
-    }
-  }
-}
-```
-
-**匹配规则**：`added` / `removed` 中的对象用业务主键定位。对于边，`source` / `target` 用所连接节点的业务主键来描述，apply 时解析为实际 UUID。
-
-#### 三种 Apply 模式
-
-```bash
-# 模式 1: 新建目标 group（最常用）
-# 复制 from_group_id 的数据 → 应用 patch → 写入 to_group_id
-graphiti-cli apply patch.json --to-group-id xyz
-
-# 模式 2: 原地修改（危险操作）
-# 直接修改 from_group_id 的数据，不可逆
-graphiti-cli apply patch.json --in-place
-
-# 模式 3: Dry-run 验证
-# 检查 patch 能否干净应用，报告冲突但不写入
-graphiti-cli apply patch.json --dry-run
-```
-
-#### Apply 执行流程
+**导入层面**：导入 SQL 表完成后必须同步 AGE 投影，因为后续 Cypher 查询依赖它。流程：
 
 ```
-1. 读取 patch.json
-2. 连接数据库，加载 from_group_id 的全部数据
-3. 生成新旧 UUID 映射表（新建目标 group 时）
-4. 按顺序应用变更（每张表独立处理）：
-
-   entity_nodes:
-     removed  → 按 (name, labels) 匹配并标记删除
-                级联标记：source/target 为被删节点的边也删除
-     added    → 生成新 UUID，INSERT
-     modified → 按 match 条件找到行，UPDATE fields 中的 new 值
-     conflicts→ 按策略处理（见下文）
-
-   entity_edges:
-     removed  → 按 (source_name, target_name, edge_name) 匹配并删除
-     added    → 解析 source/target 业务主键为实际 UUID，生成新 UUID，INSERT
-     modified → 同上
-
-   ... 其余表同理
-
-5. 处理级联影响：
-   - 实体被删除 → 所有引用该实体的边自动删除
-   - 实体被删除 → community_edges 中指向该实体的行删除
-   - Episode 被删除 → entity_edges.episodes[] 清理引用
-
-6. 调用 create_canonical_indexes() 重建索引
+INSERT 9 张 SQL 表 → create_canonical_indexes() → rebuild_age_projection()
 ```
 
-#### 冲突处理策略
+`rebuild_age_projection()` 的内部逻辑（`graph_ops.py:225-233`）：
 
-```bash
-# 严格模式：有冲突就中止（默认）
-graphiti-cli apply patch.json --strict
-# → "Error: 2 conflicts found. Use --strategy or --interactive to resolve."
+```sql
+-- 1. 清理悬垂的 community_edges（source 不存在于 community_nodes）
+DELETE FROM community_edges WHERE ...
 
-# 策略模式：自动选择
-graphiti-cli apply patch.json --strategy ours
-# → 冲突字段保留旧值
+-- 2. 清除所有 AGE 投影
+MATCH (n) DETACH DELETE n
 
-graphiti-cli apply patch.json --strategy theirs
-# → 冲突字段使用新值
+-- 3. 从 4 张节点表重建投影
+-- entity_nodes  → CREATE (:Entity {uuid, group_id, name})
+-- episodic_nodes → CREATE (:Episodic {uuid, group_id, name})
+-- community_nodes → CREATE (:Community {uuid, group_id, name})
+-- saga_nodes     → CREATE (:Saga {uuid, group_id, name})
 
-# 交互模式：逐条提示
-graphiti-cli apply patch.json --interactive
-# ! Sam (Person): summary conflict
-#   (o) ours:   "PM at Stripe"
-#   (t) theirs: "PM at Notion"
-#   (s) skip:   leave unchanged
-#   (m) manual: enter custom value
-# > o
-# ! "Product" Community: summary, members conflict
-#   ...
-
-# 部分应用：跳过冲突，应用其余
-graphiti-cli apply patch.json --skip-conflicts
-# → 应用所有非冲突变更，冲突项保持原状
-```
-
-这和 `git merge --strategy` / `git mergetool` 的交互逻辑一致。
-
-#### 可逆性
-
-```bash
-# 生成反向 patch
-graphiti-cli diff --from xyz --to abc --format json > reverse.patch.json
-
-# 验证可逆性
-graphiti-cli apply patch.json --to-group-id xyz
-graphiti-cli apply reverse.patch.json --to-group-id abc2
-graphiti-cli diff --db-group abc --db-group abc2
-# → "No differences found."
-```
-
-#### 完整工作流示例
-
-```bash
-# 1. 从数据库导出基准
-graphiti-cli export --group-id abc --output-dir data/abc
-
-# 2A. 方式一：在 JSONL 中手工编辑，生成 patch
-vim data/abc/entity_nodes.jsonl
-graphiti-cli diff --from data/abc-orig --to data/abc --format json > changes.patch.json
-
-# 2B. 方式二：直接从两个 group 生成 patch
-graphiti-cli diff --db-group abc --db-group xyz --format json > changes.patch.json
-
-# 3. 审查 patch（以 diff-viewer HTML 展示）
-graphiti-cli diff --patch changes.patch.json --output review.html
-
-# 4. Dry-run 验证
-graphiti-cli apply changes.patch.json --to-group-id xyz --dry-run
-# → "Patch applies cleanly. 5 added, 3 removed, 2 modified."
-
-# 5. 正式应用
-graphiti-cli apply changes.patch.json --to-group-id xyz
-
-# 6. 验证
-graphiti-cli diff --db-group abc --db-group xyz
-# → "All expected changes applied. No unexpected differences."
+-- 4. 从 5 张边表重建投影
+-- entity_edges      → CREATE (a)-[:RELATES_TO {uuid, group_id, name}]->(b)
+-- episodic_edges    → CREATE (:Episodic)-[:MENTIONS]->(:Entity)
+-- community_edges   → CREATE (:Community)-[:HAS_MEMBER]->(:Community|Entity)
+-- has_episode_edges → CREATE (:Saga)-[:HAS_EPISODE]->(:Episodic)
+-- next_episode_edges → CREATE (:Episodic)-[:NEXT_EPISODE]->(:Episodic)
 ```
 
 ---
 
-## 5. 完整 UUID 依赖图
+## 6. 完整 UUID 依赖图
 
 ```
 entity_nodes.uuid
-├── entity_edges.source_node_uuid          ← FK
-├── entity_edges.target_node_uuid          ← FK
-└── episodic_edges.target_node_uuid        ← FK
+├── entity_edges.source_node_uuid          ← FK (CASCADE)
+├── entity_edges.target_node_uuid          ← FK (CASCADE)
+└── episodic_edges.target_node_uuid        ← FK (CASCADE)
 
 episodic_nodes.uuid
-├── episodic_edges.source_node_uuid        ← FK
-├── has_episode_edges.target_node_uuid     ← FK
-├── next_episode_edges.source_node_uuid    ← FK
-├── next_episode_edges.target_node_uuid    ← FK
-├── saga_nodes.first_episode_uuid          ← 逻辑引用
-├── saga_nodes.last_episode_uuid           ← 逻辑引用
-└── entity_edges.episodes[]                ← 数组内的 UUID
+├── episodic_edges.source_node_uuid        ← FK (CASCADE)
+├── has_episode_edges.target_node_uuid     ← FK (CASCADE)
+├── next_episode_edges.source_node_uuid    ← FK (CASCADE)
+├── next_episode_edges.target_node_uuid    ← FK (CASCADE)
+├── saga_nodes.first_episode_uuid          ← FK (SET NULL)
+├── saga_nodes.last_episode_uuid           ← FK (SET NULL)
+└── entity_edges.episodes[]                ← text[], 引用 entity_edges.uuid
 
 entity_edges.uuid                          ← PK
-└── episodic_nodes.entity_edges[]          ← 数组内的 UUID
+└── episodic_nodes.entity_edges[]          ← text[], 引用 entity_edges.uuid
 
 community_nodes.uuid
-├── community_edges.source_node_uuid       ← FK
-└── community_edges.target_node_uuid       ← 逻辑引用
+├── community_edges.source_node_uuid       ← FK (CASCADE)
+└── community_edges.target_node_uuid       ← 多态引用 (entity or community, 无 FK)
 
 saga_nodes.uuid
-└── has_episode_edges.source_node_uuid     ← FK
+└── has_episode_edges.source_node_uuid     ← FK (CASCADE)
 ```
+
+**注意**：`entity_edges.episodes[]` 和 `episodic_nodes.entity_edges[]` 是双向 text[] 数组，内容都是 UUID，需要两阶段重映射保证一致性。
 
 ---
 
-## 6. Git 集成工作流
+## 7. Git 集成工作流
 
-JSONL + 业务主键排序使得 git diff / merge 开箱即用：
-
-```bash
-# 导出两个版本
-graphiti-cli export --group-id abc --output-dir data/abc
-graphiti-cli export --group-id xyz --output-dir data/xyz
-
-# 提交到 Git
-git add data/
-git commit -m "graph data snapshot"
-
-# 查看差异（语义 diff）
-graphiti-cli diff --from-group-id abc --to-group-id xyz > diff.html
-
-# 或 原生 git diff（查看原始 JSONL 行级差异）
-git diff --word-diff data/
-
-# 合并两个分支的修改
-git merge feature-branch
-graphiti-cli import --input-dir data/abc --new-group-id merged
-```
-
-**合并场景**：
-- 如果两个人同时修改了同一 entity 的不同字段（如 A 改了 summary，B 改了 attributes），git merge 自动合并
-- 如果两人修改了同一字段，git 会产生冲突标记，用户在 diff-viewer 中看到 `! conflict` 提示
-- 合并后需要验证数据完整性（所有引用 UUID 是否有效）
+（同原方案，略）
 
 ---
 
-## 7. 文件结构规划
+## 8. 文件结构规划
 
 ```
 graphiti-web-service/
@@ -514,7 +347,8 @@ graphiti-web-service/
 │   ├── import_.py           # 导入逻辑 (+ UUID 重映射)
 │   ├── diff.py              # 语义 diff 引擎
 │   ├── apply.py             # Patch apply 引擎 (+ 冲突处理)
-│   └── render.py            # HTML 渲染
+│   ├── render.py            # HTML 渲染
+│   └── remap.py             # UUID 重映射核心逻辑
 ├── tests/
 │   ├── test_export.py
 │   ├── test_import.py
@@ -522,7 +356,7 @@ graphiti-web-service/
 │   └── test_apply.py
 ├── diff-viewer.html          # 静态示例（已创建）
 └── docs/
-    └── 26-07-03-graphiti-diff-plan.md  # 本文档
+    └── 2026-07-03-graphiti-diff-plan.md  # 本文档
 ```
 
 ### 依赖
@@ -535,11 +369,92 @@ httpx, asyncpg, orjson  (已有)
 
 ---
 
-## 8. 待决策事项
+## 9. 已决策事项
 
-1. **向量导出格式**：`name_embedding` 以 float 数组导出还是 base64 编码？数组可读性好但体积大
-2. **边表排序**：边表排序需要 JOIN 节点表获取名称，是否在导出阶段做 JOIN 还是导出后由 CLI 解析？
-3. **增量导出**：是否需要支持 "仅导出变更"（基于时间戳）？
-4. **Patch 粒度**：patch 文件是一张大 JSON 还是 9 个文件各一张（类似 JSONL 目录结构）？
-5. **级联删除策略**：apply 时删除一个实体，是否自动级联删除关联边？还是报错要求用户显式处理？
-6. **事务边界**：apply 的所有操作是否在一个事务中？大数据量时是否需要分批提交？
+### 9.1 向量导出格式
+
+**决策：float 数组，`round(f, 6)` 压缩精度**
+
+- pgvector 内部 float32，6 位小数完全覆盖精度
+- JSONL 原生数组格式，`git diff` 可读
+- 不使用 base64（虽然体积小 30%，但丧失可读性，违背 JSONL 可 diff 的初衷）
+
+### 9.2 边表排序
+
+**决策：导出阶段在数据库层 JOIN 排序**
+
+SQL 查询直接 JOIN 节点表获取名称，一次查询完成排序，无需导出后二次解析。
+
+### 9.3 增量导出
+
+**决策：暂不支持，先做全量导出**
+
+全量导出优先交付。增量导出（基于时间戳）作为后续迭代。
+
+### 9.4 Patch 粒度
+
+**决策：单文件大 JSON**
+
+单个 `patch.json` 包含所有 9 张表的变更。理由：
+- 三向合并（ours/theirs/base）只需一个文件
+- `apply` 命令的事务边界清晰（要么全成功，要么全回滚）
+- 跨表级联操作（删除实体 → 删除边）在一个文件中表达更自然
+
+### 9.5 级联删除策略
+
+**决策：自动级联删除，严格遵循 FK 约束语义**
+
+- 删除 entity_node → 自动删除其 entity_edges（FK CASCADE）、episodic_edges（FK CASCADE）、community_edges（手动清理）
+- 删除 episodic_node → 自动删除其 episodic_edges、has_episode_edges、next_episode_edges（FK CASCADE），saga_nodes 引用置 NULL（FK SET NULL）
+- 删除 community_node → 自动删除其 community_edges（FK CASCADE）
+- 和数据库已有的 FK 约束保持一致
+
+### 9.6 事务边界
+
+**决策：全量数据在单个事务中导入**
+
+PostgreSQL transaction 保证 ACID。中等规模（<10万节点）直接单事务；超大规模可以分批 subtransaction 但需要处理中途失败的回滚。默认单事务，后续按需加分批选项。
+
+### 9.7 配置参数
+
+**`--schema` 参数必需。** 当前 driver 支持自定义 schema（`PostgresAgeDriver.schema`），同一 PostgreSQL 数据库可以有多个独立的 schema，每个 schema 有独立的 9 张 canonical 表 + AGE graph。导出/导入必须指定 schema。
+
+### 9.8 目标 group_id 已存在时的行为
+
+**决策：报错并要求手动指定 `--overwrite`**
+
+```bash
+graphiti-cli import ... --new-group-id xyz             # xyz 已有数据 → 报错退出
+graphiti-cli import ... --new-group-id xyz --overwrite  # xyz 已有数据 → 先清空再导入
+```
+
+实现：导入前先 `SELECT 1 FROM entity_nodes WHERE group_id = $1 LIMIT 1`，有结果则：
+- 无 `--overwrite` → 报错 `"group_id 'xyz' already contains data. Use --overwrite to replace."`
+- 有 `--overwrite` → 调用 `driver.graph_ops.clear_data(group_ids=[new_group_id])` 清空目标 group
+
+### 9.9 Import SQL 策略
+
+**决策：绕过 ORM 方法，直接执行原始 SQL INSERT**
+
+原因：
+- 现有 `EntityNode.save()` 等方法除了写入 SQL 表，还同步 AGE 投影（如 `entity_edge_ops.py:63` 的 `_save_projection`），逐行同步投影在大批量导入中极其低效
+- Import 的目标是一次性写入 SQL 表，最后批量重建 AGE 投影
+
+做法：
+- `export.py` 利用现有的 `get_by_group_ids` 和 `*_from_row` 读取数据
+- `import.py` 绕过 `save()` 方法，直接用 `execute_query` 执行 `INSERT INTO ... VALUES (...)` 或 `execute_values` 批量插入
+- 保留 `ON CONFLICT (uuid) DO UPDATE` 语义以保证幂等性
+- 所有 INSERT 完成后，调用 `create_canonical_indexes()` + `rebuild_age_projection()`
+
+---
+
+## 10. 实现顺序建议
+
+| 优先级 | 模块 | 说明 |
+|---|---|---|
+| 1 | `export.py` | 复杂度最低，利用现有 `*_to_row` 序列化 + `get_by_group_ids` |
+| 2 | `import.py` | UUID 重映射 + 批量 INSERT + index + projection rebuild |
+| 3 | `remap.py` | 从 import.py 抽出的重映射核心，供 apply.py 复用 |
+| 4 | `diff.py` | 业务主键匹配 + 字段级 diff |
+| 5 | `apply.py` | 最复杂：级联删除、冲突处理、三向合并策略 |
+| 6 | `render.py` | HTML 报告（可延后） |
