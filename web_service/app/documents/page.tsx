@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Upload, FileDown, Search } from 'lucide-react';
+import { Upload, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { DocumentTable } from '@/components/documents/document-table';
@@ -202,10 +202,6 @@ export default function DocumentsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <FileDown className="h-4 w-4" />
-            Import
-          </Button>
           <Button size="sm" onClick={() => setUploadOpen(true)}>
             <Upload className="h-4 w-4" />
             Upload

@@ -6,6 +6,7 @@ import {
   BarChart3,
   Network,
   FolderOpen,
+  Database,
   Menu,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -33,6 +34,11 @@ const navItems: NavItem[] = [
     label: 'Documents',
     href: '/documents',
     icon: <FolderOpen className="h-4 w-4" />,
+  },
+  {
+    label: 'Data',
+    href: '/data',
+    icon: <Database className="h-4 w-4" />,
   },
 ];
 
