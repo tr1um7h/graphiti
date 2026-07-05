@@ -73,18 +73,28 @@ class TestApplyPatch:
             },
         }
 
-        # source data (abc) loaded first (9 queries), then target data (xyz)
-        # for entity_nodes — return Bob in target
-        mock_driver = _make_driver()
-        # Override: make the target entity_nodes query return Bob
-        # _load_group_data calls 9 times (all empty), then apply loop calls
-        # entity_nodes target query — also empty by default (no Bob)
-        # So Bob won't be found, and nothing is deleted.
-        # That's fine — we just verify it doesn't crash and counts correctly
+        bob_record = {
+            'uuid': 'bob-uuid',
+            'name': 'Bob',
+            'group_id': 'xyz',
+            'labels': ['Person'],
+            'summary': 'Engineer',
+        }
+        target_response = ([bob_record], None, ['uuid', 'name', 'group_id', 'labels', 'summary'])
+        empty = ([], None, [])
+        # 9 for _load_group_data + target entity_nodes query + extras
+        mock_driver = _make_driver(execute_results=[empty] * 9 + [target_response] + [empty] * 10)
 
         result = await apply_patch(mock_driver, patch, 'abc', 'xyz', strategy='ours', dry_run=False)
 
         assert result['removed'] == 1
+        # Verify DELETE was called for Bob
+        delete_calls = [
+            c
+            for c in mock_driver.execute_query.call_args_list
+            if 'DELETE FROM' in str(c.kwargs.get('query', c.args[0] if c.args else ''))
+        ]
+        assert len(delete_calls) >= 1
 
     async def test_apply_modifies_records(self, tmp_path: Path) -> None:
         """Apply modifies existing records."""
@@ -251,6 +261,167 @@ class TestApplyPatch:
 
         assert result['added'] >= 1
 
+    async def test_remove_does_not_count_missing_record(self, tmp_path: Path) -> None:
+        """Removed count only increments when record exists in target."""
+        patch = {
+            'version': 1,
+            'metadata': {'from_group_id': 'abc'},
+            'changes': {
+                'entity_nodes': {
+                    'added': [],
+                    'removed': [
+                        {'name': 'Ghost', 'labels': ['Person']},
+                        {'name': 'Bob', 'labels': ['Person']},
+                    ],
+                    'modified': [],
+                    'conflicts': [],
+                }
+            },
+        }
+
+        # Only Bob exists in target, not Ghost
+        bob_record = {
+            'uuid': 'bob-uuid',
+            'name': 'Bob',
+            'group_id': 'xyz',
+            'labels': ['Person'],
+            'summary': 'Engineer',
+        }
+        target_response = ([bob_record], None, ['uuid', 'name', 'group_id', 'labels', 'summary'])
+        empty = ([], None, [])
+        mock_driver = _make_driver(execute_results=[empty] * 9 + [target_response] + [empty] * 10)
+
+        result = await apply_patch(mock_driver, patch, 'abc', 'xyz', strategy='ours', dry_run=False)
+
+        # Only Bob should be counted as removed
+        assert result['removed'] == 1
+
+    async def test_strategy_theirs_skips_conflict_modifications(self, tmp_path: Path) -> None:
+        """Theirs strategy skips modifications for conflicting records."""
+        patch = {
+            'version': 1,
+            'metadata': {'from_group_id': 'abc'},
+            'changes': {
+                'entity_nodes': {
+                    'added': [],
+                    'removed': [],
+                    'modified': [
+                        {
+                            'match': {'name': 'Alice', 'labels': ['Person']},
+                            'fields': {'summary': {'old': 'E', 'new': 'M'}},
+                        },
+                        {
+                            'match': {'name': 'Bob', 'labels': ['Person']},
+                            'fields': {'summary': {'old': 'X', 'new': 'Y'}},
+                        },
+                    ],
+                    'conflicts': [
+                        {'match': {'name': 'Alice', 'labels': ['Person']}, 'reason': 'both modified'},
+                    ],
+                }
+            },
+        }
+
+        alice_record = {
+            'uuid': 'alice-uuid',
+            'name': 'Alice',
+            'group_id': 'xyz',
+            'labels': ['Person'],
+            'summary': 'Engineer',
+        }
+        bob_record = {
+            'uuid': 'bob-uuid',
+            'name': 'Bob',
+            'group_id': 'xyz',
+            'labels': ['Person'],
+            'summary': 'Developer',
+        }
+        target_response = (
+            [alice_record, bob_record],
+            None,
+            ['uuid', 'name', 'group_id', 'labels', 'summary'],
+        )
+        empty = ([], None, [])
+        mock_driver = _make_driver(execute_results=[empty] * 9 + [target_response] + [empty] * 10)
+
+        result = await apply_patch(
+            mock_driver, patch, 'abc', 'xyz', strategy='theirs', dry_run=False
+        )
+
+        # Only Bob gets updated (Alice is conflicted, skipped by 'theirs' strategy)
+        assert result['modified'] == 1
+        assert result['conflicts'] == 1
+        # Only Bob's UPDATE should execute (Alice is conflicted, theirs = skip)
+        update_calls = [
+            c
+            for c in mock_driver.execute_query.call_args_list
+            if 'UPDATE' in str(c.kwargs.get('query', c.args[0] if c.args else ''))
+        ]
+        assert len(update_calls) == 1
+
+    async def test_strategy_skip_conflicts_skips_table(self, tmp_path: Path) -> None:
+        """skip-conflicts strategy skips entire table when conflicts exist."""
+        patch = {
+            'version': 1,
+            'metadata': {'from_group_id': 'abc'},
+            'changes': {
+                'entity_nodes': {
+                    'added': [{'name': 'Charlie', 'labels': ['Person'], 'summary': 'New'}],
+                    'removed': [],
+                    'modified': [
+                        {
+                            'match': {'name': 'Alice', 'labels': ['Person']},
+                            'fields': {'summary': {'old': 'E', 'new': 'M'}},
+                        },
+                    ],
+                    'conflicts': [
+                        {'match': {'name': 'Alice', 'labels': ['Person']}, 'reason': 'both modified'},
+                    ],
+                },
+                'episodic_nodes': {
+                    'added': [{'content': 'Episode 1', 'valid_at': '2024-01-01T00:00:00Z'}],
+                    'removed': [],
+                    'modified': [],
+                    'conflicts': [],
+                },
+            },
+        }
+
+        alice_record = {
+            'uuid': 'alice-uuid',
+            'name': 'Alice',
+            'group_id': 'xyz',
+            'labels': ['Person'],
+            'summary': 'Engineer',
+        }
+        target_response = (
+            [alice_record],
+            None,
+            ['uuid', 'name', 'group_id', 'labels', 'summary'],
+        )
+        empty = ([], None, [])
+        # 9 for _load_group_data + entity_nodes target + episodic_nodes target + remaining extras
+        mock_driver = _make_driver(
+            execute_results=[empty] * 9 + [target_response] + [empty] + [empty] * 10
+        )
+
+        result = await apply_patch(
+            mock_driver, patch, 'abc', 'xyz', strategy='skip-conflicts', dry_run=False
+        )
+
+        # entity_nodes table has conflicts → skipped entirely (no adds, no mods)
+        # episodic_nodes has no conflicts → added should proceed
+        assert result['added'] >= 1
+        assert result['modified'] == 0
+        assert result['conflicts'] == 1
+        # No UPDATE calls at all since entity_nodes was skipped
+        update_calls = [
+            c
+            for c in mock_driver.execute_query.call_args_list
+            if 'UPDATE' in str(c.kwargs.get('query', c.args[0] if c.args else ''))
+        ]
+        assert len(update_calls) == 0
+
 
 class TestCascadeDeletes:
     """Tests for cascade delete logic."""
@@ -338,3 +509,40 @@ class TestCascadeDeletes:
 
         assert 'community_nodes' in deleted_tables
         assert 'community_edges' in deleted_tables
+
+    def test_delete_saga_node_cascades_to_has_episode_edges(self):
+        """Deleting saga_node cascades to has_episode_edges."""
+        records = {
+            'entity_edges': [],
+            'episodic_edges': [],
+            'community_edges': [],
+            'has_episode_edges': [
+                {
+                    'uuid': 'he1',
+                    'source_node_uuid': 'saga1',
+                    'target_node_uuid': 'ep1',
+                },
+                {
+                    'uuid': 'he2',
+                    'source_node_uuid': 'saga1',
+                    'target_node_uuid': 'ep2',
+                },
+                {
+                    'uuid': 'he3',
+                    'source_node_uuid': 'saga2',
+                    'target_node_uuid': 'ep3',
+                },
+            ],
+            'next_episode_edges': [],
+        }
+
+        deletes = get_cascade_deletes('saga_nodes', 'saga1', records)
+        deleted_tables = {t for t, _ in deletes}
+
+        assert 'saga_nodes' in deleted_tables
+        assert 'has_episode_edges' in deleted_tables
+        # Only saga1's edges are deleted, not saga2's
+        deleted_uuids = {u for _, u in deletes}
+        assert 'he1' in deleted_uuids
+        assert 'he2' in deleted_uuids
+        assert 'he3' not in deleted_uuids

@@ -75,6 +75,11 @@ def get_cascade_deletes(
             if edge['source_node_uuid'] == record_uuid:
                 deletes.append(('community_edges', edge['uuid']))
 
+    elif table_name == 'saga_nodes':
+        for edge in records_by_table.get('has_episode_edges', []):
+            if edge['source_node_uuid'] == record_uuid:
+                deletes.append(('has_episode_edges', edge['uuid']))
+
     return deletes
 
 
@@ -223,11 +228,24 @@ async def apply_patch(
                         f'DELETE FROM {schema}.{del_table} WHERE uuid = %(uuid)s',
                         params={'uuid': del_uuid},
                     )
-            result['removed'] += 1
+                result['removed'] += 1
 
         # --- Apply modified records ---
+        conflict_keys: set[tuple] = set()
+        for conflict in changes.get('conflicts', []):
+            ck = _build_match_key(conflict.get('match', conflict), table_name)
+            conflict_keys.add(ck)
+
+        if strategy == 'skip-conflicts' and conflict_keys:
+            result['conflicts'] += len(conflict_keys)
+            continue
+
         for modified in changes.get('modified', []):
             match_key = _build_match_key(modified['match'], table_name)
+
+            if strategy == 'theirs' and match_key in conflict_keys:
+                continue
+
             if match_key in target_index:
                 target_rec = target_index[match_key]
                 updates = modified.get('fields', {})
@@ -247,7 +265,7 @@ async def apply_patch(
                     await driver.execute_query(sql, params=params)
             result['modified'] += 1
 
-        result['conflicts'] += len(changes.get('conflicts', []))
+        result['conflicts'] += len(conflict_keys)
 
     await driver.build_indices_and_constraints()
     await driver.graph_ops.rebuild_age_projection(driver)
