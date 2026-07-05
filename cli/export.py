@@ -66,38 +66,46 @@ _NODE_QUERIES: dict[str, str] = {
     'saga_nodes': ('SELECT * FROM {schema}.saga_nodes WHERE group_id = %(group_id)s ORDER BY name'),
 }
 
-# Edge tables: JOIN sorting via related node tables
+# Edge tables: JOIN sorting via related node tables, with semantic fields for cross-group diff
 _EDGE_QUERIES: dict[str, str] = {
     'entity_edges': (
-        'SELECT e.* FROM {schema}.entity_edges e '
+        'SELECT e.*, src.name AS source_name, tgt.name AS target_name '
+        'FROM {schema}.entity_edges e '
         'JOIN {schema}.entity_nodes src ON e.source_node_uuid = src.uuid '
         'JOIN {schema}.entity_nodes tgt ON e.target_node_uuid = tgt.uuid '
         'WHERE e.group_id = %(group_id)s '
         'ORDER BY src.name, tgt.name, e.name'
     ),
     'episodic_edges': (
-        'SELECT e.* FROM {schema}.episodic_edges e '
+        'SELECT e.*, md5(ep.content) AS source_content_hash, ent.name AS target_name '
+        'FROM {schema}.episodic_edges e '
         'JOIN {schema}.episodic_nodes ep ON e.source_node_uuid = ep.uuid '
         'JOIN {schema}.entity_nodes ent ON e.target_node_uuid = ent.uuid '
         'WHERE e.group_id = %(group_id)s '
         'ORDER BY md5(ep.content), ent.name'
     ),
     'community_edges': (
-        'SELECT e.* FROM {schema}.community_edges e '
+        'SELECT e.*, cm.name AS source_name, '
+        '  COALESCE(ent.name, tgt_cm.name) AS target_name '
+        'FROM {schema}.community_edges e '
         'JOIN {schema}.community_nodes cm ON e.source_node_uuid = cm.uuid '
         'LEFT JOIN {schema}.entity_nodes ent ON e.target_node_uuid = ent.uuid '
+        'LEFT JOIN {schema}.community_nodes tgt_cm ON e.target_node_uuid = tgt_cm.uuid '
         'WHERE e.group_id = %(group_id)s '
-        "ORDER BY cm.name, COALESCE(ent.name, '')"
+        "ORDER BY cm.name, COALESCE(ent.name, tgt_cm.name, '')"
     ),
     'has_episode_edges': (
-        'SELECT e.* FROM {schema}.has_episode_edges e '
+        'SELECT e.*, s.name AS source_name, md5(ep.content) AS target_content_hash '
+        'FROM {schema}.has_episode_edges e '
         'JOIN {schema}.saga_nodes s ON e.source_node_uuid = s.uuid '
         'JOIN {schema}.episodic_nodes ep ON e.target_node_uuid = ep.uuid '
         'WHERE e.group_id = %(group_id)s '
         'ORDER BY s.name, md5(ep.content)'
     ),
     'next_episode_edges': (
-        'SELECT e.* FROM {schema}.next_episode_edges e '
+        'SELECT e.*, md5(src.content) AS source_content_hash, '
+        '  md5(tgt.content) AS target_content_hash '
+        'FROM {schema}.next_episode_edges e '
         'JOIN {schema}.episodic_nodes src ON e.source_node_uuid = src.uuid '
         'JOIN {schema}.episodic_nodes tgt ON e.target_node_uuid = tgt.uuid '
         'WHERE e.group_id = %(group_id)s '

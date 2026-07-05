@@ -139,6 +139,9 @@ class TestE2EFullPipeline:
                 'group_id': 'group_a',
                 'source_node_uuid': 'ua1',
                 'target_node_uuid': 'ua2',
+                # Semantic fields for cross-group diff
+                'source_name': 'Alice',
+                'target_name': 'Bob',
                 'name': 'KNOWS',
                 'fact': 'Alice knows Bob',
                 'fact_embedding': None,
@@ -184,8 +187,11 @@ class TestE2EFullPipeline:
                 'group_id': 'group_b',
                 'source_node_uuid': 'ub1',
                 'target_node_uuid': 'ub2',
+                # Semantic fields for cross-group diff (same as edge_a: Alice → Bob, KNOWS)
+                'source_name': 'Alice',
+                'target_name': 'Bob',
                 'name': 'KNOWS',
-                'fact': 'Alice knows Bob well',
+                'fact': 'Alice knows Bob well',  # Modified fact
                 'fact_embedding': None,
                 'episodes': [],
                 'expired_at': None,
@@ -200,6 +206,9 @@ class TestE2EFullPipeline:
                 'group_id': 'group_b',
                 'source_node_uuid': 'ub1',
                 'target_node_uuid': 'ub3',
+                # New edge: Alice → Charlie, KNOWS
+                'source_name': 'Alice',
+                'target_name': 'Charlie',
                 'name': 'KNOWS',
                 'fact': 'Alice knows Charlie',
                 'fact_embedding': None,
@@ -252,12 +261,18 @@ class TestE2EFullPipeline:
         }
 
         ee_changes = patch['changes']['entity_edges']
-        # Edges have group-specific UUIDs in their business keys,
-        # so the old edge (ua1,ua2,KNOWS) is removed and new ones added
-        assert len(ee_changes['removed']) == 1
-        assert ee_changes['removed'][0]['name'] == 'KNOWS'
-        # Two new edges in B (ub1→ub2 and ub1→ub3)
-        assert len(ee_changes['added']) == 2
+        # With semantic business keys (source_name, target_name, name):
+        # (Alice, Bob, KNOWS) exists in both A and B → modified (fact changed)
+        # (Alice, Charlie, KNOWS) exists only in B → added
+        # No removed edges (the matching edge is modified, not removed)
+        assert len(ee_changes['removed']) == 0
+        assert len(ee_changes['added']) == 1
+        assert ee_changes['added'][0]['target_name'] == 'Charlie'
+        assert len(ee_changes['modified']) == 1
+        assert ee_changes['modified'][0]['match']['target_name'] == 'Bob'
+        assert ee_changes['modified'][0]['fields'] == {
+            'fact': {'old': 'Alice knows Bob', 'new': 'Alice knows Bob well'},
+        }
 
         # --- Phase 3: Apply patch ---
         # Target driver has group_b data (including Dave who should be removed)
@@ -595,7 +610,7 @@ class TestE2EFullPipeline:
         assert result_skip['conflicts'] == 1
         assert result_skip['modified'] == 0  # modification skipped
 
-        # Test theirs strategy (fresh driver)
+        # Test ours strategy (fresh driver) - ours skips conflicts (keeps target)
         target_data2 = {
             'entity_nodes': [entity_b[0]],
             'episodic_nodes': [],
@@ -609,10 +624,29 @@ class TestE2EFullPipeline:
         }
         mock_driver2 = _make_mock_driver(target_data2, embedding_dimension=3)
 
-        result_theirs = await apply_patch(
-            mock_driver2, patch, 'group_a', 'group_b', strategy='theirs', dry_run=False
+        result_ours = await apply_patch(
+            mock_driver2, patch, 'group_a', 'group_b', strategy='ours', dry_run=False
         )
-        assert result_theirs['modified'] == 0  # conflicted modification skipped
+        assert result_ours['modified'] == 0  # conflicted modification skipped by ours
+
+        # Test theirs strategy (fresh driver) - theirs applies conflicts (uses patch)
+        target_data3 = {
+            'entity_nodes': [entity_b[0]],
+            'episodic_nodes': [],
+            'community_nodes': [],
+            'saga_nodes': [],
+            'entity_edges': [],
+            'episodic_edges': [],
+            'community_edges': [],
+            'has_episode_edges': [],
+            'next_episode_edges': [],
+        }
+        mock_driver3 = _make_mock_driver(target_data3, embedding_dimension=3)
+
+        result_theirs = await apply_patch(
+            mock_driver3, patch, 'group_a', 'group_b', strategy='theirs', dry_run=False
+        )
+        assert result_theirs['modified'] == 1  # theirs applies the modification (uses patch data)
 
 
 class TestE2ECascadeDelete:

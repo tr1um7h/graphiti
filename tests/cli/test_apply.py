@@ -170,7 +170,7 @@ class TestApplyPatch:
         assert mock_driver.execute_query.call_count == 0
 
     async def test_strategy_ours_skips_conflicts(self, tmp_path: Path) -> None:
-        """Ours strategy handles conflicts."""
+        """Ours strategy skips modifications for conflicting records (keeps target data)."""
         patch = {
             'version': 1,
             'metadata': {'from_group_id': 'abc'},
@@ -182,9 +182,15 @@ class TestApplyPatch:
                         {
                             'match': {'name': 'Alice', 'labels': ['Person']},
                             'fields': {'summary': {'old': 'E', 'new': 'M'}},
-                        }
+                        },
+                        {
+                            'match': {'name': 'Bob', 'labels': ['Person']},
+                            'fields': {'summary': {'old': 'X', 'new': 'Y'}},
+                        },
                     ],
-                    'conflicts': [{'match': {'name': 'Alice'}, 'reason': 'changed in both'}],
+                    'conflicts': [
+                        {'match': {'name': 'Alice', 'labels': ['Person']}, 'reason': 'both modified'},
+                    ],
                 }
             },
         }
@@ -196,13 +202,33 @@ class TestApplyPatch:
             'labels': ['Person'],
             'summary': 'Engineer',
         }
-        target_response = ([alice_record], None, ['uuid', 'name', 'group_id', 'labels', 'summary'])
+        bob_record = {
+            'uuid': 'bob-uuid',
+            'name': 'Bob',
+            'group_id': 'xyz',
+            'labels': ['Person'],
+            'summary': 'Developer',
+        }
+        target_response = (
+            [alice_record, bob_record],
+            None,
+            ['uuid', 'name', 'group_id', 'labels', 'summary'],
+        )
         empty = ([], None, [])
         mock_driver = _make_driver(execute_results=[empty] * 9 + [target_response] + [empty] * 10)
 
         result = await apply_patch(mock_driver, patch, 'abc', 'xyz', strategy='ours', dry_run=False)
 
-        assert result['conflicts'] >= 0
+        # Only Bob gets updated (Alice is conflicted, skipped by 'ours' strategy)
+        assert result['modified'] == 1
+        assert result['conflicts'] == 1
+        # Only Bob's UPDATE should execute (Alice is conflicted, ours = keep target)
+        update_calls = [
+            c
+            for c in mock_driver.execute_query.call_args_list
+            if 'UPDATE' in str(c.kwargs.get('query', c.args[0] if c.args else ''))
+        ]
+        assert len(update_calls) == 1
 
     async def test_strategy_skip_conflicts_ignores_all(self, tmp_path: Path) -> None:
         """skip-conflicts strategy handles conflicts gracefully."""
@@ -296,8 +322,8 @@ class TestApplyPatch:
         # Only Bob should be counted as removed
         assert result['removed'] == 1
 
-    async def test_strategy_theirs_skips_conflict_modifications(self, tmp_path: Path) -> None:
-        """Theirs strategy skips modifications for conflicting records."""
+    async def test_strategy_theirs_applies_conflict_modifications(self, tmp_path: Path) -> None:
+        """Theirs strategy applies modifications for conflicting records (uses patch data)."""
         patch = {
             'version': 1,
             'metadata': {'from_group_id': 'abc'},
@@ -348,16 +374,16 @@ class TestApplyPatch:
             mock_driver, patch, 'abc', 'xyz', strategy='theirs', dry_run=False
         )
 
-        # Only Bob gets updated (Alice is conflicted, skipped by 'theirs' strategy)
-        assert result['modified'] == 1
+        # Both Alice and Bob get updated (theirs = apply patch data, including conflicts)
+        assert result['modified'] == 2
         assert result['conflicts'] == 1
-        # Only Bob's UPDATE should execute (Alice is conflicted, theirs = skip)
+        # Both UPDATEs should execute (theirs = use their version)
         update_calls = [
             c
             for c in mock_driver.execute_query.call_args_list
             if 'UPDATE' in str(c.kwargs.get('query', c.args[0] if c.args else ''))
         ]
-        assert len(update_calls) == 1
+        assert len(update_calls) == 2
 
     async def test_strategy_skip_conflicts_skips_table(self, tmp_path: Path) -> None:
         """skip-conflicts strategy skips entire table when conflicts exist."""

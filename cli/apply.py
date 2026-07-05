@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from cli.export import _build_query as _build_export_query
+
 _ALL_TABLES: list[str] = [
     'entity_nodes',
     'episodic_nodes',
@@ -83,15 +85,48 @@ def get_cascade_deletes(
     return deletes
 
 
+# Node tables vs edge tables for loading data
+_NODE_TABLES: frozenset[str] = frozenset({
+    'entity_nodes',
+    'episodic_nodes',
+    'community_nodes',
+    'saga_nodes',
+})
+
+_EDGE_TABLES: list[str] = [
+    'entity_edges',
+    'episodic_edges',
+    'community_edges',
+    'has_episode_edges',
+    'next_episode_edges',
+]
+
+
 async def _load_group_data(driver: Any, group_id: str) -> dict[str, list[dict]]:
-    """Load all records for a group_id from the database."""
+    """Load all records for a group_id from the database.
+
+    Edge tables are loaded with semantic fields (source_name, target_name, etc.)
+    via JOINs with related node tables, matching the format exported by cli.export.
+    """
     data: dict[str, list[dict]] = {}
-    for table_name in _ALL_TABLES:
+    schema = driver.schema
+
+    # Load node tables with simple SELECT
+    for table_name in _NODE_TABLES:
         records, _, _ = await driver.execute_query(
-            f'SELECT * FROM {driver.schema}.{table_name} WHERE group_id = %(group_id)s',
+            f'SELECT * FROM {schema}.{table_name} WHERE group_id = %(group_id)s',
             params={'group_id': group_id},
         )
         data[table_name] = records
+
+    # Load edge tables with JOINs to include semantic fields
+    for table_name in _EDGE_TABLES:
+        query = _build_export_query(table_name, schema)
+        records, _, _ = await driver.execute_query(
+            query, params={'group_id': group_id}
+        )
+        data[table_name] = records
+
     return data
 
 
@@ -106,12 +141,36 @@ def _build_business_key(record: dict, table_name: str) -> tuple:
         return (record.get('valid_at'), content_hash)
     if table_name in ('community_nodes', 'saga_nodes'):
         return (record.get('name'),)
+
+    # Edge tables: use semantic fields (not UUIDs) for cross-group matching
     if table_name == 'entity_edges':
         return (
-            record.get('source_node_uuid'),
-            record.get('target_node_uuid'),
+            record.get('source_name'),
+            record.get('target_name'),
             record.get('name'),
         )
+    if table_name == 'episodic_edges':
+        return (
+            record.get('source_content_hash'),
+            record.get('target_name'),
+        )
+    if table_name == 'community_edges':
+        return (
+            record.get('source_name'),
+            record.get('target_name'),
+        )
+    if table_name == 'has_episode_edges':
+        return (
+            record.get('source_name'),
+            record.get('target_content_hash'),
+        )
+    if table_name == 'next_episode_edges':
+        return (
+            record.get('source_content_hash'),
+            record.get('target_content_hash'),
+        )
+
+    # Fallback (should not be reached for canonical tables)
     return (record.get('source_node_uuid'), record.get('target_node_uuid'))
 
 
@@ -126,12 +185,36 @@ def _build_match_key(match: dict, table_name: str) -> tuple:
         return (match.get('valid_at'), content_hash)
     if table_name in ('community_nodes', 'saga_nodes'):
         return (match.get('name'),)
+
+    # Edge tables: use semantic fields (not UUIDs) for cross-group matching
     if table_name == 'entity_edges':
         return (
-            match.get('source_node_uuid'),
-            match.get('target_node_uuid'),
+            match.get('source_name'),
+            match.get('target_name'),
             match.get('name'),
         )
+    if table_name == 'episodic_edges':
+        return (
+            match.get('source_content_hash'),
+            match.get('target_name'),
+        )
+    if table_name == 'community_edges':
+        return (
+            match.get('source_name'),
+            match.get('target_name'),
+        )
+    if table_name == 'has_episode_edges':
+        return (
+            match.get('source_name'),
+            match.get('target_content_hash'),
+        )
+    if table_name == 'next_episode_edges':
+        return (
+            match.get('source_content_hash'),
+            match.get('target_content_hash'),
+        )
+
+    # Fallback (should not be reached for canonical tables)
     return (match.get('source_node_uuid'), match.get('target_node_uuid'))
 
 
@@ -243,7 +326,7 @@ async def apply_patch(
         for modified in changes.get('modified', []):
             match_key = _build_match_key(modified['match'], table_name)
 
-            if strategy == 'theirs' and match_key in conflict_keys:
+            if strategy == 'ours' and match_key in conflict_keys:
                 continue
 
             if match_key in target_index:
@@ -263,7 +346,7 @@ async def apply_patch(
                     set_str = ', '.join(set_clauses)
                     sql = f'UPDATE {schema}.{table_name} SET {set_str} WHERE uuid = %(_uuid)s'
                     await driver.execute_query(sql, params=params)
-            result['modified'] += 1
+                    result['modified'] += 1
 
         result['conflicts'] += len(conflict_keys)
 

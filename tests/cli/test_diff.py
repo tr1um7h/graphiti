@@ -96,29 +96,34 @@ class TestGetBusinessKey:
         assert key == ('Story 1',)
 
     def test_entity_edges(self) -> None:
-        record = {'source_node_uuid': 's1', 'target_node_uuid': 't1', 'name': 'KNOWS'}
+        # After fix: edge tables use semantic fields (not UUIDs)
+        record = {'source_name': 'Alice', 'target_name': 'Bob', 'name': 'KNOWS'}
         key = get_business_key(record, 'entity_edges')
-        assert key == ('s1', 't1', 'KNOWS')
+        assert key == ('Alice', 'Bob', 'KNOWS')
 
     def test_episodic_edges(self) -> None:
-        record = {'source_node_uuid': 's1', 'target_node_uuid': 't1'}
+        # episodic_edges: source is episodic (no name, use content hash), target is entity
+        record = {'source_content_hash': 'abc123', 'target_name': 'Bob'}
         key = get_business_key(record, 'episodic_edges')
-        assert key == ('s1', 't1')
+        assert key == ('abc123', 'Bob')
 
     def test_community_edges(self) -> None:
-        record = {'source_node_uuid': 's1', 'target_node_uuid': 't1'}
+        # community_edges: both source and target have names
+        record = {'source_name': 'Cluster A', 'target_name': 'Alice'}
         key = get_business_key(record, 'community_edges')
-        assert key == ('s1', 't1')
+        assert key == ('Cluster A', 'Alice')
 
     def test_has_episode_edges(self) -> None:
-        record = {'source_node_uuid': 's1', 'target_node_uuid': 't1'}
+        # has_episode_edges: source is saga (has name), target is episodic (content hash)
+        record = {'source_name': 'Story 1', 'target_content_hash': 'def456'}
         key = get_business_key(record, 'has_episode_edges')
-        assert key == ('s1', 't1')
+        assert key == ('Story 1', 'def456')
 
     def test_next_episode_edges(self) -> None:
-        record = {'source_node_uuid': 's1', 'target_node_uuid': 't1'}
+        # next_episode_edges: both are episodic (content hash)
+        record = {'source_content_hash': 'abc123', 'target_content_hash': 'def456'}
         key = get_business_key(record, 'next_episode_edges')
-        assert key == ('s1', 't1')
+        assert key == ('abc123', 'def456')
 
 
 # ---------------------------------------------------------------------------
@@ -281,23 +286,71 @@ class TestExtractMatchFields:
         assert result == {'name': 'Alice', 'labels': ['Person']}
 
     def test_entity_edges(self) -> None:
+        # After fix: edge tables use semantic fields (not UUIDs)
         record = {
-            'source_node_uuid': 's1',
-            'target_node_uuid': 't1',
+            'source_name': 'Alice',
+            'target_name': 'Bob',
             'name': 'KNOWS',
             'uuid': 'u1',
         }
         result = extract_match_fields(record, 'entity_edges')
         assert result == {
-            'source_node_uuid': 's1',
-            'target_node_uuid': 't1',
+            'source_name': 'Alice',
+            'target_name': 'Bob',
             'name': 'KNOWS',
         }
 
     def test_episodic_edges(self) -> None:
-        record = {'source_node_uuid': 's1', 'target_node_uuid': 't1', 'uuid': 'u1'}
+        # episodic_edges: source is episodic (content hash), target is entity (name)
+        record = {
+            'source_content_hash': 'abc123',
+            'target_name': 'Bob',
+            'uuid': 'u1',
+        }
         result = extract_match_fields(record, 'episodic_edges')
-        assert result == {'source_node_uuid': 's1', 'target_node_uuid': 't1'}
+        assert result == {
+            'source_content_hash': 'abc123',
+            'target_name': 'Bob',
+        }
+
+    def test_community_edges(self) -> None:
+        # community_edges: both source and target have names
+        record = {
+            'source_name': 'Cluster A',
+            'target_name': 'Alice',
+            'uuid': 'u1',
+        }
+        result = extract_match_fields(record, 'community_edges')
+        assert result == {
+            'source_name': 'Cluster A',
+            'target_name': 'Alice',
+        }
+
+    def test_has_episode_edges(self) -> None:
+        # has_episode_edges: source is saga (has name), target is episodic (content hash)
+        record = {
+            'source_name': 'Story 1',
+            'target_content_hash': 'def456',
+            'uuid': 'u1',
+        }
+        result = extract_match_fields(record, 'has_episode_edges')
+        assert result == {
+            'source_name': 'Story 1',
+            'target_content_hash': 'def456',
+        }
+
+    def test_next_episode_edges(self) -> None:
+        # next_episode_edges: both are episodic (content hash)
+        record = {
+            'source_content_hash': 'abc123',
+            'target_content_hash': 'def456',
+            'uuid': 'u1',
+        }
+        result = extract_match_fields(record, 'next_episode_edges')
+        assert result == {
+            'source_content_hash': 'abc123',
+            'target_content_hash': 'def456',
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +597,7 @@ class TestDiffGroups:
         assert changes['modified'][0]['fields'] == {'summary': {'old': 'Eng', 'new': 'Manager'}}
 
     def test_edge_table_diff(self, tmp_path: Path) -> None:
-        """Test 8: Edge table diff using UUID pairs as business keys."""
+        """Test 8: Edge table diff using semantic fields as business keys."""
         left = _make_export_dir(
             tmp_path,
             'g_left',
@@ -553,8 +606,8 @@ class TestDiffGroups:
                     {
                         'uuid': 'e1',
                         'group_id': 'g_left',
-                        'source_node_uuid': 's1',
-                        'target_node_uuid': 't1',
+                        'source_name': 'Alice',
+                        'target_name': 'Bob',
                         'name': 'KNOWS',
                         'fact': 'Alice knows Bob',
                     },
@@ -570,8 +623,8 @@ class TestDiffGroups:
                     {
                         'uuid': 'e2',
                         'group_id': 'g_right',
-                        'source_node_uuid': 's1',
-                        'target_node_uuid': 't1',
+                        'source_name': 'Alice',
+                        'target_name': 'Bob',
                         'name': 'KNOWS',
                         'fact': 'Alice knows Bob well',
                     },
@@ -579,8 +632,8 @@ class TestDiffGroups:
                     {
                         'uuid': 'e3',
                         'group_id': 'g_right',
-                        'source_node_uuid': 's2',
-                        'target_node_uuid': 't2',
+                        'source_name': 'Charlie',
+                        'target_name': 'Dave',
                         'name': 'LIKES',
                         'fact': 'Charlie likes Dave',
                     },
@@ -603,9 +656,10 @@ class TestDiffGroups:
         # Existing edge modified
         assert len(changes['modified']) == 1
         mod = changes['modified'][0]
+        # Match uses semantic fields (names, not UUIDs)
         assert mod['match'] == {
-            'source_node_uuid': 's1',
-            'target_node_uuid': 't1',
+            'source_name': 'Alice',
+            'target_name': 'Bob',
             'name': 'KNOWS',
         }
         assert mod['fields'] == {'fact': {'old': 'Alice knows Bob', 'new': 'Alice knows Bob well'}}
@@ -772,7 +826,7 @@ class TestDiffGroups:
         assert added['fact'] == 'A knows B'
 
     def test_community_edges_diff(self, tmp_path: Path) -> None:
-        """Community edges diff detects added/removed by (source, target) key."""
+        """Community edges diff detects added/removed by (source_name, target_name) key."""
         left = _make_export_dir(
             tmp_path,
             'g_left',
@@ -780,7 +834,7 @@ class TestDiffGroups:
                 'community_edges': [
                     {
                         'uuid': 'ce1', 'group_id': 'g_left',
-                        'source_node_uuid': 'c1', 'target_node_uuid': 'e1',
+                        'source_name': 'Cluster A', 'target_name': 'Alice',
                         'name': 'HAS_MEMBER', 'fact': 'old fact',
                     },
                 ]
@@ -793,7 +847,7 @@ class TestDiffGroups:
                 'community_edges': [
                     {
                         'uuid': 'ce2', 'group_id': 'g_right',
-                        'source_node_uuid': 'c2', 'target_node_uuid': 'e2',
+                        'source_name': 'Cluster B', 'target_name': 'Bob',
                         'name': 'NEW_EDGE', 'fact': 'new fact',
                     },
                 ]
@@ -809,14 +863,14 @@ class TestDiffGroups:
         assert changes['removed'][0]['name'] == 'HAS_MEMBER'
 
     def test_episodic_edges_diff(self, tmp_path: Path) -> None:
-        """Episodic edges diff uses (source, target) business key."""
+        """Episodic edges diff uses (source_content_hash, target_name) business key."""
         left = _make_export_dir(
             tmp_path,
             'g_left',
             {
                 'episodic_edges': [
                     {'uuid': 'ee1', 'group_id': 'g_left',
-                     'source_node_uuid': 'ep1', 'target_node_uuid': 'e1'},
+                     'source_content_hash': 'hash1', 'target_name': 'Alice'},
                 ]
             },
         )
@@ -825,10 +879,12 @@ class TestDiffGroups:
             'g_right',
             {
                 'episodic_edges': [
+                    # Same key, no change
                     {'uuid': 'ee2', 'group_id': 'g_right',
-                     'source_node_uuid': 'ep1', 'target_node_uuid': 'e1'},
+                     'source_content_hash': 'hash1', 'target_name': 'Alice'},
+                    # Different key
                     {'uuid': 'ee3', 'group_id': 'g_right',
-                     'source_node_uuid': 'ep2', 'target_node_uuid': 'e2'},
+                     'source_content_hash': 'hash2', 'target_name': 'Bob'},
                 ]
             },
         )
@@ -836,20 +892,20 @@ class TestDiffGroups:
         patch = diff_groups(left, right)
         changes = patch['changes']['episodic_edges']
 
-        # Same (source, target) → no change detected (UUID/group_id ignored)
+        # One new edge added, zero removed
         assert len(changes['added']) == 1
         assert len(changes['removed']) == 0
         assert len(changes['modified']) == 0
 
     def test_has_episode_edges_diff(self, tmp_path: Path) -> None:
-        """has_episode_edges diff uses (source, target) key."""
+        """has_episode_edges diff uses (source_name, target_content_hash) key."""
         left = _make_export_dir(
             tmp_path,
             'g_left',
             {
                 'has_episode_edges': [
                     {'uuid': 'he1', 'group_id': 'g_left',
-                     'source_node_uuid': 'saga1', 'target_node_uuid': 'ep1'},
+                     'source_name': 'Story 1', 'target_content_hash': 'hash1'},
                 ]
             },
         )
@@ -858,8 +914,9 @@ class TestDiffGroups:
             'g_right',
             {
                 'has_episode_edges': [
+                    # Same key → no change
                     {'uuid': 'he2', 'group_id': 'g_right',
-                     'source_node_uuid': 'saga1', 'target_node_uuid': 'ep1'},
+                     'source_name': 'Story 1', 'target_content_hash': 'hash1'},
                 ]
             },
         )
@@ -873,14 +930,14 @@ class TestDiffGroups:
         assert changes['modified'] == []
 
     def test_next_episode_edges_diff(self, tmp_path: Path) -> None:
-        """next_episode_edges diff detects changes by (source, target) key."""
+        """next_episode_edges diff detects changes by (source_content_hash, target_content_hash) key."""
         left = _make_export_dir(
             tmp_path,
             'g_left',
             {
                 'next_episode_edges': [
                     {'uuid': 'ne1', 'group_id': 'g_left',
-                     'source_node_uuid': 'ep1', 'target_node_uuid': 'ep2'},
+                     'source_content_hash': 'hash1', 'target_content_hash': 'hash2'},
                 ]
             },
         )
@@ -889,8 +946,9 @@ class TestDiffGroups:
             'g_right',
             {
                 'next_episode_edges': [
+                    # Different target → different key
                     {'uuid': 'ne2', 'group_id': 'g_right',
-                     'source_node_uuid': 'ep1', 'target_node_uuid': 'ep3'},
+                     'source_content_hash': 'hash1', 'target_content_hash': 'hash3'},
                 ]
             },
         )

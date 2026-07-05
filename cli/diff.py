@@ -60,14 +60,39 @@ def get_business_key(record: dict, table_name: str) -> tuple:
     if table_name in ('community_nodes', 'saga_nodes'):
         return (record.get('name'),)
 
+    # Edge tables: use semantic fields (not UUIDs) for cross-group matching
     if table_name == 'entity_edges':
         return (
-            record.get('source_node_uuid'),
-            record.get('target_node_uuid'),
+            record.get('source_name'),
+            record.get('target_name'),
             record.get('name'),
         )
 
-    # All other edge tables: (source, target)
+    if table_name == 'episodic_edges':
+        return (
+            record.get('source_content_hash'),
+            record.get('target_name'),
+        )
+
+    if table_name == 'community_edges':
+        return (
+            record.get('source_name'),
+            record.get('target_name'),
+        )
+
+    if table_name == 'has_episode_edges':
+        return (
+            record.get('source_name'),
+            record.get('target_content_hash'),
+        )
+
+    if table_name == 'next_episode_edges':
+        return (
+            record.get('source_content_hash'),
+            record.get('target_content_hash'),
+        )
+
+    # Fallback (should not be reached for canonical tables)
     return (record.get('source_node_uuid'), record.get('target_node_uuid'))
 
 
@@ -127,14 +152,39 @@ def extract_match_fields(record: dict, table_name: str) -> dict:
     if table_name in ('community_nodes', 'saga_nodes'):
         return {'name': record.get('name')}
 
+    # Edge tables: use semantic fields (not UUIDs) for cross-group matching
     if table_name == 'entity_edges':
         return {
-            'source_node_uuid': record.get('source_node_uuid'),
-            'target_node_uuid': record.get('target_node_uuid'),
+            'source_name': record.get('source_name'),
+            'target_name': record.get('target_name'),
             'name': record.get('name'),
         }
 
-    # Other edge tables
+    if table_name == 'episodic_edges':
+        return {
+            'source_content_hash': record.get('source_content_hash'),
+            'target_name': record.get('target_name'),
+        }
+
+    if table_name == 'community_edges':
+        return {
+            'source_name': record.get('source_name'),
+            'target_name': record.get('target_name'),
+        }
+
+    if table_name == 'has_episode_edges':
+        return {
+            'source_name': record.get('source_name'),
+            'target_content_hash': record.get('target_content_hash'),
+        }
+
+    if table_name == 'next_episode_edges':
+        return {
+            'source_content_hash': record.get('source_content_hash'),
+            'target_content_hash': record.get('target_content_hash'),
+        }
+
+    # Fallback (should not be reached for canonical tables)
     return {
         'source_node_uuid': record.get('source_node_uuid'),
         'target_node_uuid': record.get('target_node_uuid'),

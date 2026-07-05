@@ -371,6 +371,13 @@ Response:
 }
 ```
 
+> **⚠️ 性能注意**：Diff API 需要将两个 group 分别导出到临时目录（全部 9 张表的
+> JSONL），再调用 `diff_groups()` 比较。对于数据量大的 group（数万条记录），
+> 每次 diff 都会产生大量临时文件 I/O。当前设计未做缓存优化。
+>
+> 如后续出现性能瓶颈，可考虑直接查询数据库做 diff（跳过 JSONL 中间步骤），
+> 或对同一 group 的导出结果做缓存复用。
+
 #### 3.2.6 导出 Diff
 
 ```
@@ -409,6 +416,16 @@ Response:
   "patch": { ... full patch content ... }
 }
 ```
+
+> **⚠️ 设计隐患：preview 返回完整 patch 内容**
+>
+> 当 patch 文件较大（含大量 embedding 向量）时，全量返回给前端会导致：
+> - 网络传输慢（可能数十 MB）
+> - 前端内存压力大，浏览器可能卡死
+> - 实际 UI 只需 summary 统计数据即可
+>
+> **建议**：preview API 只返回 `summary`（各表增删改统计），不返回完整 `patch`。
+> 前端如需查看具体变更记录，可通过后续分页 API 按需加载。
 
 #### 3.2.8 应用 Patch
 
@@ -548,6 +565,36 @@ result = await apply_patch_from_file(driver, patch_file, from_group_id, to_group
 
 这些字段在导入时会被自动过滤（不写入数据库），仅用于 diff 业务键匹配。
 
+> **⚠️ 已知问题：边表导出现状不满足 diff 需求**
+>
+> 当前 `cli/export.py` 的边表查询（`_EDGE_QUERIES`）仅输出数据库原始列（`SELECT e.*`），
+> **没有** JOIN 解析语义标识字段。而 `cli/diff.py` 的边表业务键使用
+> `source_node_uuid` / `target_node_uuid`——这些 UUID 在每个 group 中独立生成，
+> 跨组 diff 时**无法匹配**，导致所有边表 diff 永远显示"全部删除 + 全部新增"，
+> modified 始终为 0。
+>
+> 9 张表中有 5 张是边表，这意味着 diff + patch 功能对超过一半的表完全不可用。
+>
+> 5 张边表连接了不同类型的节点，各自需要不同的语义键**（不能统一用 source_name/target_name）**：
+>
+> | 边表 | Source 类型 | Target 类型 | 语义键 |
+> |---|---|---|---|
+> | entity_edges | entity (有 name) | entity (有 name) | `(source_name, target_name, edge_name)` |
+> | episodic_edges | episodic (无 name) | entity (有 name) | `(source_content_hash, target_name)` |
+> | community_edges | community (有 name) | entity (有 name) | `(source_name, target_name)` |
+> | has_episode_edges | saga (有 name) | episodic (无 name) | `(source_name, target_content_hash)` |
+> | next_episode_edges | episodic (无 name) | episodic (无 name) | `(source_content_hash, target_content_hash)` |
+>
+> episodic 节点没有 `name`，靠 content hash 标识，所以不能用统一字段名。
+>
+> **修正方案**：
+> 1. `cli/export.py`：每个边表查询各自添加对应的语义字段到 SELECT（例：entity_edges 加 `src.name AS source_name, tgt.name AS target_name`，episodic_edges 加 `md5(ep.content) AS source_content_hash, ent.name AS target_name`）
+> 2. `cli/diff.py:get_business_key()`：每个边表独立分支，使用对应的语义字段
+> 3. `cli/diff.py:extract_match_fields()`：同步改为输出语义字段而非 UUID
+> 4. `cli/apply.py:_build_business_key()` 和 `_build_match_key()`：同步更新为语义字段匹配
+>
+> 详见 Section 10.1。
+
 ---
 
 ## 6. 测试策略
@@ -665,6 +712,23 @@ test('should import patch with confirmation', async ({ page }) => {
 - **Theirs** — 使用 patch 中来源 group（from_group_id）的数据覆盖冲突项
 - **Skip** — 跳过整个有冲突的表，不修改任何记录
 
+> **⚠️ 已知问题：代码中策略语义反转（实际无影响）+ 计数 bug**
+>
+> **策略反转**：`cli/apply.py:246` 中 `if strategy == 'theirs' and match_key in conflict_keys: continue`
+> 错误地将 theirs 当作"保留目标"处理——theirs 跳过冲突（实际是 ours 语义），ours 不跳过（实际是 theirs 语义）。
+>
+> **但实际影响为零**：`cli/diff.py:_diff_table()` 中 `conflicts` 永远初始化为 `[]` 且从不填充，
+> diff 输出永远不含冲突记录。apply 阶段的 `conflict_keys` 始终是空集，策略分支代码路径永远不会被触发。
+>
+> **额外 bug — modified 计数错误**：`apply.py:266` 的 `result['modified'] += 1` 在 `if match_key in target_index:` 块**外面**。
+> 当 patch 引用 target 中不存在的记录时，不会执行 UPDATE，但计数仍然 +1，导致报告数字虚高。
+>
+> **修正方案**：
+> 1. 将 line 246 的 `'theirs'` 改为 `'ours'`（或等将来实现真正的冲突检测后再改）
+> 2. 将 `result['modified'] += 1` 移入 `if match_key in target_index:` 块内
+>
+> 详见 Section 10.2。
+
 ---
 
 ## 9. 确认项汇总
@@ -678,3 +742,193 @@ test('should import patch with confirmation', async ({ page }) => {
 - [x] from_group_id：默认取 patch.metadata.from_group_id，前端允许用户覆盖
 - [x] 导入 Data 对话框：metadata 摘要展示，表数据默认折叠按需展开
 - [x] 导入 Patch 对话框：必须展示 patch 预览 + 用户手动确认
+
+---
+
+## 10. 已知问题与修正方案
+
+> 本节记录设计评审中发现的 CLI 代码与设计不符的问题。
+> 这些问题属于底层 `cli/` 模块的 bug，需要在 Web API 实现前修复。
+
+### 10.1 🔴 严重：边表 Diff 业务键使用 UUID（跨组匹配失效）
+
+**影响范围**：`cli/diff.py`、`cli/apply.py`、`cli/export.py`
+
+**现状**：
+- `diff.py:get_business_key()` 对边表使用 `(source_node_uuid, target_node_uuid)` 作为业务键
+- UUID 在每个 group 中独立生成，同一逻辑边在不同 group 中 UUID 不同
+- 跨组 diff 时，所有边表永远显示"全部删除 + 全部新增"，modified 始终为 0
+- 9 张表中 5 张是边表（entity_edges, episodic_edges, community_edges, has_episode_edges, next_episode_edges），**超过一半的 diff 功能完全不可用**
+- apply_patch 的 DELETE 和 UPDATE 路径同样依赖业务键匹配，也一并失效
+
+**根因**：`cli/export.py` 的 `_EDGE_QUERIES` 虽然已 JOIN 节点表（用于排序），但 `SELECT e.*` 仅输出数据库原始列，未导出连接节点的语义标识字段。
+
+**关键洞察 — 5 张边表不能用统一的修复方案**。不同边表连接不同类型的节点，semantic key 各不相同：
+
+| 边表 | Source 节点 | Target 节点 | 语义业务键 |
+|---|---|---|---|
+| `entity_edges` | entity (有 `name`) | entity (有 `name`) | `(source_name, target_name, name)` |
+| `episodic_edges` | episodic (无 name) | entity (有 `name`) | `(source_content_hash, target_name)` |
+| `community_edges` | community (有 `name`) | entity (有 `name`) | `(source_name, target_name)` |
+| `has_episode_edges` | saga (有 `name`) | episodic (无 name) | `(source_name, target_content_hash)` |
+| `next_episode_edges` | episodic (无 name) | episodic (无 name) | `(source_content_hash, target_content_hash)` |
+
+episodic 节点没有 `name` 字段，标识靠 content 的 SHA256 前 12 位 hash。**不能**统一用 `source_name`/`target_name`。
+
+**修正方案**（3 个文件，每个边表独立处理）：
+
+**Step 1 — `cli/export.py`**：每个边表查询单独添加语义字段到 SELECT：
+
+```python
+# entity_edges: 两端都是 entity → export names
+'SELECT e.*, src.name AS source_name, tgt.name AS target_name '
+'FROM {schema}.entity_edges e '
+'JOIN {schema}.entity_nodes src ON e.source_node_uuid = src.uuid '
+'JOIN {schema}.entity_nodes tgt ON e.target_node_uuid = tgt.uuid '
+'WHERE e.group_id = %(group_id)s '
+'ORDER BY src.name, tgt.name, e.name'
+
+# episodic_edges: source=episodic(无name), target=entity(有name)
+'SELECT e.*, md5(ep.content) AS source_content_hash, ent.name AS target_name '
+'FROM {schema}.episodic_edges e '
+'JOIN {schema}.episodic_nodes ep ON e.source_node_uuid = ep.uuid '
+'JOIN {schema}.entity_nodes ent ON e.target_node_uuid = ent.uuid '
+'WHERE e.group_id = %(group_id)s '
+'ORDER BY md5(ep.content), ent.name'
+
+# community_edges: source=community(有name), target=entity(有name)
+'SELECT e.*, cm.name AS source_name, '
+'  COALESCE(ent.name, tgt_cm.name) AS target_name '
+'FROM {schema}.community_edges e '
+'JOIN {schema}.community_nodes cm ON e.source_node_uuid = cm.uuid '
+'LEFT JOIN {schema}.entity_nodes ent ON e.target_node_uuid = ent.uuid '
+'LEFT JOIN {schema}.community_nodes tgt_cm ON e.target_node_uuid = tgt_cm.uuid '
+'WHERE e.group_id = %(group_id)s '
+"ORDER BY cm.name, COALESCE(ent.name, tgt_cm.name, '')"
+
+# has_episode_edges: source=saga(有name), target=episodic(无name)
+'SELECT e.*, s.name AS source_name, md5(ep.content) AS target_content_hash '
+'FROM {schema}.has_episode_edges e '
+'JOIN {schema}.saga_nodes s ON e.source_node_uuid = s.uuid '
+'JOIN {schema}.episodic_nodes ep ON e.target_node_uuid = ep.uuid '
+'WHERE e.group_id = %(group_id)s '
+'ORDER BY s.name, md5(ep.content)'
+
+# next_episode_edges: 两端都是 episodic → 都用 content hash
+'SELECT e.*, md5(src.content) AS source_content_hash, '
+'  md5(tgt.content) AS target_content_hash '
+'FROM {schema}.next_episode_edges e '
+'JOIN {schema}.episodic_nodes src ON e.source_node_uuid = src.uuid '
+'JOIN {schema}.episodic_nodes tgt ON e.target_node_uuid = tgt.uuid '
+'WHERE e.group_id = %(group_id)s '
+'ORDER BY md5(src.content), md5(tgt.content)'
+```
+
+**Step 2 — `cli/diff.py:get_business_key()`**：每个边表独立分支：
+
+```python
+if table_name == 'entity_edges':
+    return (record.get('source_name'), record.get('target_name'), record.get('name'))
+if table_name == 'episodic_edges':
+    return (record.get('source_content_hash'), record.get('target_name'))
+if table_name == 'community_edges':
+    return (record.get('source_name'), record.get('target_name'))
+if table_name == 'has_episode_edges':
+    return (record.get('source_name'), record.get('target_content_hash'))
+if table_name == 'next_episode_edges':
+    return (record.get('source_content_hash'), record.get('target_content_hash'))
+```
+
+**Step 3 — `cli/diff.py:extract_match_fields()`**：同步改为输出语义字段，移除 UUID 引用。
+
+**Step 4 — `cli/apply.py:_build_business_key()` 和 `_build_match_key()`**：与 diff.py 保持一致的每个边表独立分支。
+
+**注意事项**：
+- 新增的语义字段不属于数据库列，`import_group()` 的 `_build_insert_sql` 会自然跳过它们（因为 INSERT 只写表中存在的列）
+- `community_edges` 需要同时 LEFT JOIN entity_nodes 和 community_nodes 以覆盖 target 的两种可能类型
+
+### 10.2 🟡 重要：ours/theirs 策略语义反转 + 冲突永不产生 + modified 计数 bug
+
+**影响范围**：`cli/apply.py`、`cli/diff.py`
+
+**发现 3 个关联问题：**
+
+#### 问题 A：策略语义反转（实际无影响）
+
+`apply.py:246` 中 `if strategy == 'theirs' and match_key in conflict_keys: continue` 将 theirs 错误地当作"保留目标"处理——theirs 跳过冲突（实际是 ours 语义），ours 不跳过（实际是 theirs 语义）。
+
+**但实际影响为零**，原因见问题 B。
+
+#### 问题 B：diff_groups() 永远不产生冲突（根因）
+
+`cli/diff.py:_diff_table()` 中：
+```python
+conflicts: list[dict] = []   # line 172 — 初始化为空
+# ... 只填充 added/removed/modified ...
+# conflicts 字段从未被 append
+return {
+    'added': added,
+    'removed': removed,
+    'modified': modified,
+    'conflicts': conflicts,   # line 197 — 永远是 []
+}
+```
+
+diff 输出从不包含冲突记录，apply 阶段的 `conflict_keys` 始终是空集，策略分支代码路径永远不会被触发。这意味着：
+
+- 策略选择 UI（ours/theirs/skip-conflicts）是 **纯粹的 dead feature** — 无论如何选，行为都一样
+- 真正的冲突检测（target 数据自 diff 创建后被修改）未实现 — apply_patch 无条件信任 patch 内容做 UPDATE，不验证 target 当前状态
+
+#### 问题 C：modified 计数 bug（实际有影响）
+
+`apply.py:266`：
+```python
+if match_key in target_index:       # line 249
+    target_rec = target_index[match_key]
+    ...
+    await driver.execute_query(...)  # 实际执行 UPDATE
+result['modified'] += 1              # line 266 — 在 if 块外面！
+```
+
+当 `match_key` 不在 target_index 中时（patch 引用 target 不存在的记录），不会执行 UPDATE，但 `modified` 计数仍 +1。报告"已修改 9 条"但实际可能 0 条真正执行了。
+
+**修正方案**：
+1. **策略反转**（低优先级）：将 line 246 的 `'theirs'` 改为 `'ours'`，或等将来实现真正的冲突检测后再修复
+2. **冲突检测**（需要在 apply 时实现）：对每条 modified 记录，验证 target 中对应记录的当前字段值是否与 patch 中的 `old` 值一致；不一致则为冲突。这是让策略选择变成有意义功能的前提
+3. **计数 bug**（高优先级）：将 `result['modified'] += 1` 移入 `if match_key in target_index:` 块内
+
+### 10.3 🟡 重要：Diff API 性能——大 group 需要完整导出
+
+**影响范围**：`GET /rest/data/diff`
+
+**现状**：Diff API 需要将两个 group 分别导出到临时目录（全部 9 张表 JSONL），再调用 `diff_groups()` 比较。`diff_groups()` 的核心逻辑是纯内存业务键匹配，中间 JSONL 文件只是数据载体。对于数据量大的 group（数万条记录），每次 diff 都会产生不必要的磁盘 I/O。
+
+**短期方案**：在 API 文档中说明性能限制，设置合理超时。
+
+**长期方案**：`diff_groups()` 改为接受 `list[dict]` 参数（而非文件路径），API 层直接查询数据库将结果传入，跳过 JSONL 文件中间步骤。
+
+### 10.4 🟡 重要：Patch Preview 返回完整 patch 内容
+
+**影响范围**：`POST /rest/data/patch/preview`
+
+**现状**：preview API 返回 `"patch": { ... full patch content ... }`，当 patch 文件较大（含大量 embedding 向量）时：
+- 网络传输慢（可能数十 MB）
+- 前端内存压力大，浏览器可能卡死
+- 实际 UI 只需 summary 统计数据即可
+
+**额外问题**：当前缺少 patch 内容的 **schema 验证**。`diff_groups()` 输出格式是隐式的（无 JSON Schema 定义），如果用户上传格式错误的 JSON，`apply_patch` 会在运行时崩溃（KeyError/TypeError）而非给出清晰的 400 错误。
+
+**修正方案**：
+1. preview API 只返回 `summary`（各表增删改计数），不返回完整 `patch`
+2. 增加 patch `version` 字段校验和基本结构 schema 验证（至少检查 `metadata`、`changes` 字段存在且类型正确）
+3. 前端如需查看具体变更记录，可通过后续分页 API 按需加载
+
+### 10.5 🟡 轻微：导入操作无返回值
+
+**影响范围**：`cli/import_.py:import_group()`
+
+**现状**：`import_group()` 返回 `None`，API 层需要导入后再查询数据库获取 `table_counts`。
+
+**影响**：仅多一次查询，不影响正确性。优先级低于 10.1-10.4。
+
+**建议**：后续可考虑让 `import_group()` 返回 `dict[str, int]`（各表插入计数），减少额外查询。
