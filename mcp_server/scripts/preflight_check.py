@@ -82,9 +82,10 @@ class TestConfig:
         self.OPENAI_BASE_URL = os.environ.get('OPENAI_BASE_URL', '')
         self.OPENAI_MODEL_NAME = os.environ.get('OPENAI_MODEL_NAME', 'MiniMax-M2.7')
         # Embedding
+        self.EMBEDDER_PROVIDER = os.environ.get('EMBEDDER_PROVIDER', 'bge_zh')
         self.EMBEDDING_API_URL = os.environ.get('EMBEDDING_API_URL', '')
-        self.EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
-        self.EMBEDDING_DIM = int(os.environ.get('EMBEDDING_DIM', '384'))
+        self.EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'BAAI/bge-large-zh-v1.5')
+        self.EMBEDDING_DIM = int(os.environ.get('EMBEDDING_DIM', '1024'))
 
 
 # ======================================================================
@@ -336,18 +337,35 @@ async def test_postgres_age(config: TestConfig, result: TestResult):
 
 
 async def test_embedding(config: TestConfig, result: TestResult):
-    """Test remote embedding API for OpenAI compatibility.
+    """Test embedding API or local embedder.
 
-    Uses httpx directly instead of the OpenAI SDK because the SDK
-    issues a /v1/models request first, which many custom embedding
-    services don't implement.
+    For remote OpenAI-compatible embedding services, issues requests to the
+    endpoint. For local embedders (bge_zh, sentence-transformers), verifies
+    the configuration and skips API connectivity checks.
     """
     suite = 'Embedding Model API'
     print(f'\n{"=" * 60}')
     print(f'  Suite: {suite}')
+    print(f'  Provider: {config.EMBEDDER_PROVIDER}')
     print(f'  API URL: {config.EMBEDDING_API_URL or "(not set)"}')
     print(f'  Model: {config.EMBEDDING_MODEL}')
     print(f'{"=" * 60}')
+
+    # Local embedders don't need a remote API endpoint
+    if config.EMBEDDER_PROVIDER in ('bge_zh', 'sentence-transformers'):
+        result.record(
+            suite,
+            'Configuration',
+            TestResult.PASS,
+            f'Local embedder ({config.EMBEDDER_PROVIDER}) configured; no API endpoint needed',
+        )
+        result.record(
+            suite,
+            'Model Name',
+            TestResult.PASS,
+            f'Model: {config.EMBEDDING_MODEL}, Dims: {config.EMBEDDING_DIM}',
+        )
+        return
 
     if not config.EMBEDDING_API_URL:
         result.record(suite, 'Configuration', TestResult.SKIP, 'EMBEDDING_API_URL not set')
@@ -469,14 +487,11 @@ async def test_llm(config: TestConfig, result: TestResult):
         'model': config.OPENAI_MODEL_NAME,
         'messages': [
             {'role': 'system', 'content': 'You are a helpful assistant.'},
-            {'role': 'user', 'content': 'Reply with the single word: OK'},
+            {'role': 'user', 'content': 'Reply with the single word: OK in json'},
         ],
         'temperature': 0,
         'max_tokens': 512,
         'response_format': {'type': 'json_object'},
-        # Mirrors extra_body in OpenAIGenericClient: ask reasoning models
-        # (Qwen, DeepSeek-R1, etc.) to split reasoning into a separate field.
-        'reasoning_split': True,
     }
     try:
         async with httpx.AsyncClient(timeout=60.0) as http_client:

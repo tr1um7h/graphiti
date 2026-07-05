@@ -31,12 +31,12 @@ class Settings(BaseSettings):
     llm_timeout: int = Field(default=600, description='LLM request timeout in seconds')
 
     # --- Embedder configuration ------------------------------------------
-    embedder_provider: str = Field(default='openai')
+    embedder_provider: str = Field(default='bge_zh')
     embedding_api_url: str | None = Field(
         default=None,
         description='Base URL for the embedding API (e.g. http://localhost:8080/v1)',
     )
-    embedding_model: str = Field(default='all-MiniLM-L6-v2')
+    embedding_model: str = Field(default='BAAI/bge-large-zh-v1.5')
 
     # --- PostgreSQL AGE configuration -------------------------------------
     database_provider: DatabaseProvider = Field(default=DatabaseProvider.POSTGRES_AGE)
@@ -45,7 +45,7 @@ class Settings(BaseSettings):
         description='PostgreSQL AGE connection DSN',
     )
     postgres_age_graph_name: str = Field(default='graphiti')
-    postgres_age_embedding_dimension: int = Field(default=384)
+    postgres_age_embedding_dimension: int = Field(default=1024)
 
     # --- Neo4j configuration (legacy fallback) ----------------------------
     neo4j_uri: str | None = Field(None)

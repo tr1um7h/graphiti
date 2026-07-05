@@ -167,14 +167,15 @@ class EmbedderProvidersConfig(BaseModel):
     azure_openai: AzureOpenAIProviderConfig | None = None
     gemini: GeminiProviderConfig | None = None
     voyage: VoyageProviderConfig | None = None
+    bge_zh: dict | None = None
 
 
 class EmbedderConfig(BaseModel):
     """Embedder configuration."""
 
-    provider: str = Field(default='openai', description='Embedder provider')
-    model: str = Field(default='text-embedding-3-small', description='Model name')
-    dimensions: int = Field(default=1536, description='Embedding dimensions')
+    provider: str = Field(default='bge_zh', description='Embedder provider')
+    model: str = Field(default='BAAI/bge-large-zh-v1.5', description='Model name')
+    dimensions: int = Field(default=1024, description='Embedding dimensions')
     providers: EmbedderProvidersConfig = Field(default_factory=EmbedderProvidersConfig)
 
 

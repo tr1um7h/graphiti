@@ -52,7 +52,7 @@ RUN uv venv /app/mcp/.venv && \
     . /app/mcp/.venv/bin/activate && \
     uv pip install --no-deps -e ./graphiti_core && \
     uv sync --no-group dev && \
-    uv pip install "pgvector>=0.3.6" "psycopg[binary,pool]>=3.2.0"
+    uv pip install "pgvector>=0.3.6" "psycopg[binary,pool]>=3.2.0" "sentence-transformers>=2.0.0"
 
 # Set up environment to use the venv
 ENV VIRTUAL_ENV=/app/mcp/.venv

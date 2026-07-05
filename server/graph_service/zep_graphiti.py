@@ -43,6 +43,16 @@ def _create_embedder(settings: Settings) -> EmbedderClient | None:
             http_client=http_client,
         )
         return OpenAIEmbedder(config=config, client=client)
+
+    if settings.embedder_provider == 'bge_zh':
+        from graphiti_core.embedder.bge_zh import BGELargeZHEmbedder, BGELargeZHEmbedderConfig
+
+        logger.info('Using local BGELargeZH embedder (BAAI/bge-large-zh-v1.5, 1024d)')
+        config = BGELargeZHEmbedderConfig(
+            embedding_dim=settings.postgres_age_embedding_dimension or 1024,
+        )
+        return BGELargeZHEmbedder(config=config)
+
     return None
 
 

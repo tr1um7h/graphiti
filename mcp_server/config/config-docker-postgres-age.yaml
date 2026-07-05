@@ -40,9 +40,9 @@ llm:
       api_url: ${GROQ_API_URL:https://api.groq.com/openai/v1}
 
 embedder:
-  provider: ${EMBEDDER_PROVIDER:-openai}  # Use remote embedding service via OpenAI-compatible API
-  model: ${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
-  dimensions: ${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
+  provider: ${EMBEDDER_PROVIDER:-bge_zh}  # Local BGE-large-zh-v1.5 (1024d)
+  model: ${EMBEDDING_MODEL:-BAAI/bge-large-zh-v1.5}
+  dimensions: ${POSTGRES_AGE_EMBEDDING_DIMENSION:-1024}
 
   providers:
     openai:
@@ -74,7 +74,7 @@ database:
     postgres_age:
       dsn: ${POSTGRES_AGE_DSN:postgresql://graphiti:graphiti@postgres-age:5432/graphiti}
       graph_name: ${POSTGRES_AGE_GRAPH_NAME:graphiti}
-      embedding_dimension: ${POSTGRES_AGE_EMBEDDING_DIMENSION:384}
+      embedding_dimension: ${POSTGRES_AGE_EMBEDDING_DIMENSION:1024}
 
 graphiti:
   group_id: ${GRAPHITI_GROUP_ID:main}

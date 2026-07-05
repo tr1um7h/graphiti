@@ -8,3 +8,11 @@ __all__ = [
     'OpenAIEmbedderConfig',
     'SentenceTransformerEmbedder',
 ]
+
+# BGELargeZH embedder for Chinese text is optionally available
+try:
+    from .bge_zh import BGELargeZHEmbedder, BGELargeZHEmbedderConfig  # noqa: F401
+
+    __all__.extend(['BGELargeZHEmbedder', 'BGELargeZHEmbedderConfig'])
+except ImportError:
+    pass

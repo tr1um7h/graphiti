@@ -244,6 +244,17 @@ class Graphiti:
                     embedding_dim=embedding_dim
                 )
                 self.embedder = SentenceTransformerEmbedder(config=config)
+            elif embedder_provider == 'bge_zh':
+                from graphiti_core.embedder.bge_zh import (
+                    BGELargeZHEmbedder,
+                    BGELargeZHEmbedderConfig,
+                )
+
+                embedding_dim = int(
+                    os.getenv('POSTGRES_AGE_EMBEDDING_DIMENSION', '1024')
+                )
+                config = BGELargeZHEmbedderConfig(embedding_dim=embedding_dim)
+                self.embedder = BGELargeZHEmbedder(config=config)
             else:
                 self.embedder = OpenAIEmbedder()
         if cross_encoder:

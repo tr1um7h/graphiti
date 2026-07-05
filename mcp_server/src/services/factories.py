@@ -387,6 +387,20 @@ class EmbedderFactory:
                     embedding_dim=config.dimensions or 384,
                 )
 
+            case 'bge_zh':
+                from graphiti_core.embedder.bge_zh import (
+                    BGELargeZHEmbedder,
+                    BGELargeZHEmbedderConfig,
+                )
+
+                logger.info(
+                    'Creating BGELargeZHEmbedder (local BAAI/bge-large-zh-v1.5, 1024d)'
+                )
+                embedder_config = BGELargeZHEmbedderConfig(
+                    embedding_dim=config.dimensions or 1024,
+                )
+                return BGELargeZHEmbedder(config=embedder_config)
+
             case _:
                 raise ValueError(f'Unsupported Embedder provider: {provider}')
 
