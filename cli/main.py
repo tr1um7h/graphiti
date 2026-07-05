@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import sys
+from pathlib import Path
 
 
 def main():
@@ -59,8 +60,17 @@ def main():
 async def handle_command(args):
     """Dispatch to command handler."""
     if args.command == 'export':
-        print('Export command not yet implemented')
-        sys.exit(1)
+        from cli.export import export_group_with_sorting
+        from graphiti_core.driver.postgres_age.driver import PostgresAgeDriver
+
+        driver = PostgresAgeDriver(dsn=args.dsn, schema=args.schema)
+        try:
+            await export_group_with_sorting(
+                driver, args.group_id, args.schema, Path(args.output_dir)
+            )
+            print(f'Exported to {args.output_dir}')
+        finally:
+            await driver.close()
     elif args.command == 'import':
         print('Import command not yet implemented')
         sys.exit(1)
