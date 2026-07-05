@@ -1,22 +1,24 @@
-// components/graph/node-detail-popover.tsx
+// components/graph/node-detail-panel.tsx
 'use client';
 
 import { useEffect, useState } from 'react';
 import type { EntityDetail } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { AlertTriangle, X, Expand, Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
-interface NodeDetailPopoverProps {
-  nodeId: string | null;
-  x: number;
-  y: number;
+interface NodeDetailPanelProps {
+  nodeId: string;
+  onClose: () => void;
+  onExpandNeighbors: (nodeId: string) => void;
 }
 
-export function NodeDetailPopover({ nodeId, x, y }: NodeDetailPopoverProps) {
+export function NodeDetailPanel({ nodeId, onClose, onExpandNeighbors }: NodeDetailPanelProps) {
   const [detail, setDetail] = useState<EntityDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [expanding, setExpanding] = useState(false);
 
   useEffect(() => {
     if (!nodeId) {
@@ -48,32 +50,30 @@ export function NodeDetailPopover({ nodeId, x, y }: NodeDetailPopoverProps) {
       .finally(() => setLoading(false));
   }, [nodeId]);
 
-  // Compute position: show to the right of the click point,
-  // but keep within the viewport.
-  const left = nodeId ? Math.min(x + 16, window.innerWidth - 348) : 0;
-  const top = nodeId ? Math.min(y + 16, window.innerHeight - 400) : 0;
+  const handleExpand = async () => {
+    setExpanding(true);
+    try {
+      await onExpandNeighbors(nodeId);
+    } finally {
+      setExpanding(false);
+    }
+  };
 
   return (
     <div
-      data-popover="true"
-      style={{
-        position: 'fixed',
-        left,
-        top,
-        opacity: nodeId ? 1 : 0,
-        pointerEvents: nodeId ? 'auto' : 'none',
-        zIndex: 50,
-      }}
-      className="w-80 rounded-lg border bg-background shadow-xl transition-opacity duration-150"
-      onClick={(e) => e.stopPropagation()}
+      data-panel="true"
+      className="w-80 border-l bg-background flex flex-col h-full"
     >
       {/* Header */}
-      <div className="border-b px-4 py-3">
+      <div className="border-b px-4 py-3 flex items-center justify-between">
         <h3 className="font-semibold">实体详情</h3>
+        <Button variant="ghost" size="icon" onClick={onClose} className="h-8 w-8">
+          <X className="h-4 w-4" />
+        </Button>
       </div>
 
       {/* Body */}
-      <div className="max-h-[350px] overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4">
         {loading ? (
           <div className="space-y-3">
             <Skeleton className="h-6 w-3/4" />
@@ -100,16 +100,23 @@ export function NodeDetailPopover({ nodeId, x, y }: NodeDetailPopoverProps) {
 
             {detail.relationships.length > 0 && (
               <div>
-                <p className="mb-2 text-sm font-medium">关系</p>
+                <p className="mb-2 text-sm font-medium">
+                  关系 ({detail.relationships.length})
+                </p>
                 <ul className="space-y-1">
-                  {detail.relationships.map((r) => (
+                  {detail.relationships.slice(0, 10).map((r) => (
                     <li
                       key={r.id}
-                      className="text-sm text-muted-foreground"
+                      className="text-sm text-muted-foreground truncate"
                     >
                       ├ {r.fact}
                     </li>
                   ))}
+                  {detail.relationships.length > 10 && (
+                    <li className="text-xs text-muted-foreground">
+                      ...还有 {detail.relationships.length - 10} 个关系
+                    </li>
+                  )}
                 </ul>
               </div>
             )}
@@ -121,7 +128,7 @@ export function NodeDetailPopover({ nodeId, x, y }: NodeDetailPopoverProps) {
                   {detail.documents.map((d) => (
                     <li
                       key={d.id}
-                      className="text-sm text-muted-foreground"
+                      className="text-sm text-muted-foreground truncate"
                     >
                       ├ {d.name}{' '}
                       <Badge variant="outline" className="text-xs">
@@ -134,6 +141,24 @@ export function NodeDetailPopover({ nodeId, x, y }: NodeDetailPopoverProps) {
             )}
           </div>
         ) : null}
+      </div>
+
+      {/* Footer - Expand button */}
+      <div className="border-t p-4">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExpand}
+          disabled={expanding || loading}
+          className="w-full"
+        >
+          {expanding ? (
+            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+          ) : (
+            <Expand className="h-4 w-4 mr-2" />
+          )}
+          展开邻居节点
+        </Button>
       </div>
     </div>
   );

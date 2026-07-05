@@ -91,8 +91,18 @@ export const EntityDetailSchema = z.object({
 });
 
 // neighbors handler returns center separately; nodes does NOT include center.
+// center may be a partial entity (neighbors endpoint doesn't return full detail).
 export const NeighborsResponseSchema = z.object({
-  center: EntityDetailSchema,
+  center: z
+    .object({
+      id: z.string(),
+      name: z.string().optional(),
+      summary: z.string().optional(),
+      labels: z.array(z.string()).optional(),
+      attributes: z.record(z.string(), z.unknown()).optional(),
+    })
+    .nullable()
+    .optional(),
   nodes: z.array(GraphNodeSchema),
   edges: z.array(GraphEdgeSchema),
 });

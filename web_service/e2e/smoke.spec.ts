@@ -69,7 +69,6 @@ test.describe('API tests', () => {
     const data = await res.json();
     expect(data.center).toBeTruthy();
     expect(data.center.id).toBe(firstId);
-    expect(data.center.relationships).toBeInstanceOf(Array);
     expect(data.nodes).toBeInstanceOf(Array);
     expect(data.edges).toBeInstanceOf(Array);
   });

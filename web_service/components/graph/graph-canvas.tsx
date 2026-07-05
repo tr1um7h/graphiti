@@ -10,7 +10,7 @@ import { applyLayout } from '@/lib/graph-layouts';
 interface GraphCanvasProps {
   className?: string;
   groupId?: string;
-  onNodeClick?: (nodeId: string, screenX: number, screenY: number) => void;
+  onNodeClick?: (nodeId: string) => void;
   onBackgroundClick?: () => void;
 }
 
@@ -22,15 +22,16 @@ export function GraphCanvas({
 }: GraphCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sigmaRef = useRef<Sigma | null>(null);
+  // Click detection state (component-level refs)
+  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastClickNodeRef = useRef<string | null>(null);
 
   // Subscribe to graph data AND layout algorithm
   const graph = useGraphStore((s) => s.graph);
   const layoutAlgorithm = useGraphStore((s) => s.layoutAlgorithm);
   const [loading, setLoading] = useState(true);
 
-  // Keep the latest callbacks in refs so the Sigma init effect
-  // (which only depends on `graph`) always has fresh values
-  // without needing to re-create Sigma.
+  // Keep the latest callbacks in refs
   const onNodeClickRef = useRef(onNodeClick);
   const onBackgroundClickRef = useRef(onBackgroundClick);
   onNodeClickRef.current = onNodeClick;
@@ -61,19 +62,29 @@ export function GraphCanvas({
     loadGraph();
   }, [groupId]);
 
-  // Initialize Sigma renderer — only re-run when graph changes
+  // Initialize Sigma when graph instance changes
+  // - focusNode replaces graph → triggers rebuild (correct: shows new subgraph)
+  // - expandNeighbors modifies graph → reference unchanged, Sigma auto-updates via graphology events
   useEffect(() => {
     if (!containerRef.current || !graph) return;
 
-    // Clean up previous instance
+    console.log('[GraphCanvas] Initializing Sigma with graph:', graph.order, 'nodes');
+
+    // Clean up previous Sigma instance
     if (sigmaRef.current) {
       sigmaRef.current.kill();
       sigmaRef.current = null;
     }
 
-    // Apply initial layout before rendering
-    const currentLayout = useGraphStore.getState().layoutAlgorithm;
-    applyLayout(graph, currentLayout);
+    // Clear pending click timer
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+    lastClickNodeRef.current = null;
+
+    // Apply initial layout
+    applyLayout(graph, layoutAlgorithm);
 
     const sigma = new Sigma(graph, containerRef.current, {
       renderEdgeLabels: graph.order < 2000,
@@ -85,73 +96,82 @@ export function GraphCanvas({
       maxCameraRatio: 10,
     });
 
-    // Click node → notify parent with screen coordinates
-    // IMPORTANT: call preventSigmaDefault() to stop clickStage from also firing,
-    // which would immediately close the popover.
-    sigma.on('clickNode', ({ node, event, preventSigmaDefault }) => {
-      preventSigmaDefault();
-      const container = containerRef.current;
-      if (!container) return;
-      // Sigma v3 provides event.x / event.y as viewport coordinates
-      // relative to the canvas. We add the container's page offset.
-      const rect = container.getBoundingClientRect();
-      const screenX = rect.left + (event.x ?? 0);
-      const screenY = rect.top + (event.y ?? 0);
-      onNodeClickRef.current?.(node, screenX, screenY);
-    });
+    sigmaRef.current = sigma;
 
-    // Double click → expand neighbors
-    sigma.on('doubleClickNode', async ({ node }) => {
-      try {
-        const res = await fetch(
-          `/api/graph/entities/${node}/neighbors?depth=1`,
-        );
-        const data = await res.json();
-        useGraphStore
-          .getState()
-          .expandNeighbors(node, data.nodes, data.edges);
-      } catch (err) {
-        console.error('Failed to expand neighbors:', err);
+    // --- Event handlers ---
+    sigma.on('doubleClickNode', ({ node }) => {
+      console.log('[GraphCanvas] Double click - expanding neighbors on current graph');
+      // Cancel any pending single-click timer
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
       }
+      lastClickNodeRef.current = null;
+
+      fetch(`/api/graph/entities/${node}/neighbors?depth=1`)
+        .then((res) => res.json())
+        .then((data) => {
+          console.log('[GraphCanvas] Adding', data.nodes?.length, 'neighbors to current graph');
+          useGraphStore.getState().expandNeighbors(node, data.nodes, data.edges);
+        })
+        .catch((err) => console.error('[GraphCanvas] Expand failed:', err));
     });
 
-    // Hover → highlight
+    sigma.on('clickNode', ({ node }) => {
+      // Single click: use timer to distinguish from double click.
+      // If doubleClickNode fires within the window, it cancels the timer.
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+      }
+
+      lastClickNodeRef.current = node;
+
+      clickTimerRef.current = setTimeout(() => {
+        if (lastClickNodeRef.current === node) {
+          console.log('[GraphCanvas] Single click confirmed - focusing subgraph');
+          onNodeClickRef.current?.(node);
+          lastClickNodeRef.current = null;
+        }
+      }, 300);
+    });
+
     sigma.on('enterNode', ({ node }) => {
       useGraphStore.getState().setHoveredNode(node);
     });
+
     sigma.on('leaveNode', () => {
       useGraphStore.getState().setHoveredNode(null);
     });
 
-    // Click background → deselect
     sigma.on('clickStage', () => {
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
+      lastClickNodeRef.current = null;
       onBackgroundClickRef.current?.();
     });
 
-    sigmaRef.current = sigma;
-
     return () => {
-      sigma.kill();
-      sigmaRef.current = null;
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
+      if (sigmaRef.current) {
+        sigmaRef.current.kill();
+        sigmaRef.current = null;
+      }
     };
-  }, [graph]); // <-- only depends on graph
+  }, [graph]); // Re-run when graph instance is replaced (loadGraph/focusNode)
 
-  // Re-apply layout when layoutAlgorithm changes (without recreating Sigma)
+  // Re-apply layout when layoutAlgorithm changes
   useEffect(() => {
     if (!graph || !sigmaRef.current) return;
     applyLayout(graph, layoutAlgorithm);
     sigmaRef.current.refresh();
-    // Reset camera to center the graph after layout change
-    sigmaRef.current.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
-  }, [layoutAlgorithm, graph]);
+  }, [layoutAlgorithm]);
 
-  // Auto-center camera after initial graph load
-  useEffect(() => {
-    if (!graph || !sigmaRef.current) return;
-    sigmaRef.current.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
-  }, [graph]);
-
-  if (loading) {
+  if (loading || !graph) {
     return (
       <div className="flex h-full items-center justify-center bg-muted/30">
         <div className="text-center">

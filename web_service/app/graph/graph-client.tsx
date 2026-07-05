@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { GraphCanvas } from '@/components/graph/graph-canvas';
 import { GraphControls } from '@/components/graph/graph-controls';
 import { GraphLegend } from '@/components/graph/graph-legend';
-import { NodeDetailPopover } from '@/components/graph/node-detail-popover';
+import { NodeDetailPanel } from '@/components/graph/node-detail-panel';
 import { GraphSearch } from '@/components/graph/graph-search';
 import { useGraphStore } from '@/stores/graph-store';
 import type { GraphApiResponse } from '@/lib/types';
@@ -20,14 +20,10 @@ export default function GraphPageClient() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('all');
 
-  // Popover state: which node is focused and where to position the popover
-  const [popover, setPopover] = useState<{
-    nodeId: string;
-    x: number;
-    y: number;
-  } | null>(null);
+  // Selected node for right panel (null = panel hidden)
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
 
-  // Whether a search-driven focus is active (to show "clear" button)
+  // Whether a focus is active (from search or node click)
   const centerNode = useGraphStore((s) => s.centerNode);
 
   // Load group list
@@ -38,64 +34,67 @@ export default function GraphPageClient() {
       .catch((err) => console.error('Failed to load groups:', err));
   }, []);
 
-  // Search result selected → fetch subgraph and focus
-  const handleSearchSelect = useCallback(async (nodeId: string) => {
+  // Focus on a node: fetch subgraph and show right panel
+  const focusOnNode = useCallback(async (nodeId: string) => {
     try {
       const res = await fetch(
         `/api/graph/subgraph?nodeId=${encodeURIComponent(nodeId)}`,
       );
       const data: GraphApiResponse = await res.json();
       useGraphStore.getState().focusNode(nodeId, data);
-      // Close any open popover
-      setPopover(null);
+      setSelectedNode(nodeId);
     } catch (err) {
       console.error('Failed to fetch subgraph:', err);
     }
   }, []);
 
-  // Group changed → GraphCanvas will reload via groupId prop
+  // Search result selected → focus on node
+  const handleSearchSelect = useCallback(async (nodeId: string) => {
+    await focusOnNode(nodeId);
+  }, [focusOnNode]);
+
+  // Node clicked in canvas → focus on node
+  const handleNodeClick = useCallback(async (nodeId: string) => {
+    await focusOnNode(nodeId);
+  }, [focusOnNode]);
+
+  // Group changed → reload graph
   const handleGroupChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const groupId = e.target.value;
     setSelectedGroup(groupId);
-    setPopover(null);
+    setSelectedNode(null);
+    useGraphStore.getState().resetFocus();
   };
 
-  // Node clicked in canvas → show popover
-  const handleNodeClick = useCallback(
-    (nodeId: string, screenX: number, screenY: number) => {
-      setPopover({ nodeId, x: screenX, y: screenY });
-    },
-    [],
-  );
-
-  // Background clicked → close popover
+  // Background clicked → close panel and reset focus
   const handleBackgroundClick = useCallback(() => {
-    setPopover(null);
+    setSelectedNode(null);
+    useGraphStore.getState().resetFocus();
   }, []);
 
-  // Global click listener: close popover when clicking outside.
-  // IMPORTANT: ignore clicks on the Sigma canvas — those are handled by
-  // sigma.on('clickNode') / sigma.on('clickStage') respectively.
-  // Without this, the document-level handler would run AFTER clickNode
-  // and immediately close the popover that clickNode just opened.
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (!popover) return;
-      const target = e.target as HTMLElement;
-      // If the click is inside the popover, ignore
-      if (target.closest('[data-popover="true"]')) return;
-      // If the click is on the Sigma canvas, let Sigma events handle it
-      if (target.closest('canvas') || target.tagName === 'CANVAS') return;
-      setPopover(null);
-    };
-    document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  }, [popover]);
+  // Close panel → reset focus
+  const handleClosePanel = useCallback(() => {
+    setSelectedNode(null);
+    useGraphStore.getState().resetFocus();
+  }, []);
+
+  // Expand neighbors (from panel button)
+  const handleExpandNeighbors = useCallback(async (nodeId: string) => {
+    try {
+      const res = await fetch(
+        `/api/graph/entities/${nodeId}/neighbors?depth=1`,
+      );
+      const data = await res.json();
+      useGraphStore.getState().expandNeighbors(nodeId, data.nodes, data.edges);
+    } catch (err) {
+      console.error('Failed to expand neighbors:', err);
+    }
+  }, []);
 
   // Clear search focus → restore full graph
   const handleClearFocus = useCallback(() => {
+    setSelectedNode(null);
     useGraphStore.getState().resetFocus();
-    setPopover(null);
   }, []);
 
   const groupId = selectedGroup === 'all' ? undefined : selectedGroup;
@@ -110,7 +109,7 @@ export default function GraphPageClient() {
             onClick={handleClearFocus}
             className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
           >
-            清除搜索
+            返回全图
           </button>
         )}
         <div className="flex-1" />
@@ -129,18 +128,25 @@ export default function GraphPageClient() {
         <GraphControls />
       </div>
 
-      {/* Main area — Sigma canvas fills the entire space */}
-      <div className="relative flex-1 overflow-hidden">
-        <GraphCanvas
-          groupId={groupId}
-          onNodeClick={handleNodeClick}
-          onBackgroundClick={handleBackgroundClick}
-        />
-        <NodeDetailPopover
-          nodeId={popover?.nodeId ?? null}
-          x={popover?.x ?? 0}
-          y={popover?.y ?? 0}
-        />
+      {/* Main area — Canvas left, Panel right */}
+      <div className="relative flex-1 overflow-hidden flex">
+        {/* Canvas area */}
+        <div className="flex-1 relative">
+          <GraphCanvas
+            groupId={groupId}
+            onNodeClick={handleNodeClick}
+            onBackgroundClick={handleBackgroundClick}
+          />
+        </div>
+
+        {/* Right panel (conditional) */}
+        {selectedNode && (
+          <NodeDetailPanel
+            nodeId={selectedNode}
+            onClose={handleClosePanel}
+            onExpandNeighbors={handleExpandNeighbors}
+          />
+        )}
       </div>
 
       {/* Legend bar */}
