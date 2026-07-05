@@ -188,4 +188,7 @@ async def import_group(
 
     # 6. Post-import: rebuild indices and AGE projection
     await driver.build_indices_and_constraints()
-    await driver.graph_ops.rebuild_age_projection(driver)
+    # Only rebuild AGE projection if clear_data wasn't called
+    # (clear_data already rebuilds it internally)
+    if not (group_exists and overwrite):
+        await driver.graph_ops.rebuild_age_projection(driver)

@@ -42,7 +42,7 @@ def main():
     apply_parser.add_argument('--to-group-id', required=True, help='Target group ID')
     apply_parser.add_argument(
         '--strategy',
-        choices=['ours', 'theirs', 'interactive', 'skip-conflicts'],
+        choices=['ours', 'theirs', 'skip-conflicts'],
         default='ours',
         help='Conflict resolution',
     )

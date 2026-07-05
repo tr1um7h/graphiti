@@ -368,7 +368,7 @@ graphiti-cli apply \
   --patch-file diff.json \
   --from-group-id abc \
   --to-group-id xyz \
-  [--strategy ours|theirs|interactive|skip-conflicts] \
+  [--strategy ours|theirs|skip-conflicts] \
   [--dry-run]
 ```
 
@@ -381,7 +381,6 @@ graphiti-cli apply \
 - `--strategy` (optional): Conflict resolution strategy (default: `ours`)
   - `ours`: Keep source values on conflict
   - `theirs`: Use patch values on conflict
-  - `interactive`: Prompt user for each conflict
   - `skip-conflicts`: Skip conflicting changes
 - `--dry-run` (optional): Validate patch without applying (default: false)
 
@@ -450,7 +449,7 @@ def main():
     apply_parser.add_argument('--patch-file', required=True, help='Patch file path')
     apply_parser.add_argument('--from-group-id', required=True, help='Source group ID')
     apply_parser.add_argument('--to-group-id', required=True, help='Target group ID')
-    apply_parser.add_argument('--strategy', choices=['ours', 'theirs', 'interactive', 'skip-conflicts'], default='ours', help='Conflict resolution')
+    apply_parser.add_argument('--strategy', choices=['ours', 'theirs', 'skip-conflicts'], default='ours', help='Conflict resolution')
     apply_parser.add_argument('--dry-run', action='store_true', help='Validate without applying')
     
     args = parser.parse_args()
@@ -1118,7 +1117,7 @@ def test_import_group_with_uuid_remapping(tmp_path):
     mock_driver.graph_ops.rebuild_age_projection = AsyncMock()
     
     # Import
-    import_group(mock_driver, export_dir, "xyz", "public", overwrite=False)
+    import_group(mock_driver, export_dir, "xyz", overwrite=False)
     
     # Verify INSERT was called
     assert mock_driver.execute_query.call_count > 0
@@ -1144,7 +1143,7 @@ def test_import_fails_when_group_exists(tmp_path):
     mock_driver.execute_query.return_value = ([{"exists": 1}], [], [])
     
     with pytest.raises(ValueError, match="already contains data"):
-        import_group(mock_driver, export_dir, "xyz", "public", overwrite=False)
+        import_group(mock_driver, export_dir, "xyz", overwrite=False)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1186,21 +1185,21 @@ async def check_group_exists(driver, group_id: str) -> bool:
     )
     return len(records) > 0
 
-async def import_group(driver, input_dir: Path, new_group_id: str, schema: str, overwrite: bool):
+async def import_group(driver, input_dir: Path, new_group_id: str, overwrite: bool = False):
     """Import JSONL files to database with UUID remapping."""
     input_dir = Path(input_dir)
-    
+
     # Check if target exists
     if await check_group_exists(driver, new_group_id):
         if not overwrite:
             raise ValueError(f"group_id '{new_group_id}' already contains data. Use --overwrite to replace.")
         # Clear existing data
         await driver.graph_ops.clear_data(group_ids=[new_group_id])
-    
+
     # Load metadata
     metadata = json.loads((input_dir / "metadata.json").read_text())
-    
-    # Validate embedding dimension
+
+    # Validate embedding dimension (reads driver.embedding_dimension, no schema param needed)
     target_dim = getattr(driver, 'embedding_dimension', 1024)
     if metadata.get('embedding_dimension', 1024) != target_dim:
         raise ValueError(f"Embedding dimension mismatch: export has {metadata['embedding_dimension']}, database has {target_dim}")
@@ -1305,7 +1304,7 @@ elif args.command == 'import':
     
     driver = PostgresAgeDriver(dsn=args.dsn, schema=args.schema)
     try:
-        metadata = await import_group(driver, Path(args.input_dir), args.new_group_id, args.schema, args.overwrite)
+        metadata = await import_group(driver, Path(args.input_dir), args.new_group_id, args.overwrite)
         print(f"Imported {metadata['counts']} records to group_id '{args.new_group_id}'")
     finally:
         await driver.close()
