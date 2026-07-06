@@ -63,7 +63,7 @@ export default function DataPageClient() {
   };
 
   const handleDelete = async (groupId: string) => {
-    if (!confirm(`Delete group "${groupId}"? This cannot be undone.`)) return;
+    if (!confirm(`确定要删除分组 "${groupId}" 吗？此操作不可撤销。`)) return;
     setDeleting(groupId);
     try {
       const res = await fetch(`/api/data/groups/${encodeURIComponent(groupId)}`, {
@@ -71,7 +71,7 @@ export default function DataPageClient() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: 'Delete failed' }));
-        throw new Error(err.error || err.detail || 'Delete failed');
+        throw new Error(err.error || err.detail || '删除失败');
       }
       // Clear selection if the deleted group was selected
       if (selectedGroup1 === groupId) setSelectedGroup1(null);
@@ -79,7 +79,7 @@ export default function DataPageClient() {
       fetchGroups();
     } catch (error) {
       console.error('Delete failed:', error);
-      alert(error instanceof Error ? error.message : 'Delete failed');
+      alert(error instanceof Error ? error.message : '删除失败');
     } finally {
       setDeleting(null);
     }
@@ -100,15 +100,15 @@ export default function DataPageClient() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Data Management</h2>
+          <h2 className="text-2xl font-bold">数据管理</h2>
           <p className="text-sm text-muted-foreground">
-            {groups.length} groups total
+            共 {groups.length} 个分组
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={handleRefresh}>
             <RefreshCw className="h-4 w-4" />
-            Refresh
+            刷新
           </Button>
           <Button
             variant="outline"
@@ -116,7 +116,7 @@ export default function DataPageClient() {
             onClick={() => setImportDataOpen(true)}
           >
             <Upload className="h-4 w-4" />
-            Import Data
+            导入数据
           </Button>
           {selectedGroup1 && (
             <Button
@@ -125,7 +125,7 @@ export default function DataPageClient() {
               onClick={() => setImportPatchOpen(true)}
             >
               <FileDown className="h-4 w-4" />
-              Import Patch
+              导入补丁
             </Button>
           )}
         </div>
@@ -138,7 +138,7 @@ export default function DataPageClient() {
           onChange={(e) => setSelectedGroup1(e.target.value || null)}
           className="h-9 rounded-md border bg-background px-3 text-sm"
         >
-          <option value="">Select source group...</option>
+          <option value="">选择源分组...</option>
           {groups.map((g) => (
             <option key={g.group_id} value={g.group_id}>
               {g.group_id}
@@ -154,7 +154,7 @@ export default function DataPageClient() {
               onChange={(e) => setSelectedGroup2(e.target.value || null)}
               className="h-9 rounded-md border bg-background px-3 text-sm"
             >
-              <option value="">Select target group (optional)...</option>
+              <option value="">选择目标分组（可选）...</option>
               {groups
                 .filter((g) => g.group_id !== selectedGroup1)
                 .map((g) => (
@@ -173,7 +173,7 @@ export default function DataPageClient() {
             onClick={handleClearSelection}
             className="text-muted-foreground"
           >
-            Clear
+            清除
           </Button>
         )}
       </div>
@@ -181,7 +181,7 @@ export default function DataPageClient() {
       {/* Content based on mode */}
       {loading ? (
         <div className="rounded-lg border bg-card p-8 text-center text-muted-foreground">
-          Loading groups...
+          加载分组中...
         </div>
       ) : mode === 'list' ? (
         <GroupsTable groups={groups} onSelect={handleSelectGroup} onDelete={handleDelete} deleting={deleting} />

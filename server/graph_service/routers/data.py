@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 
 from graph_service.zep_graphiti import ZepGraphitiDep
 
@@ -33,6 +33,23 @@ _ALL_TABLES = [
     'has_episode_edges',
     'next_episode_edges',
 ]
+
+# Tables that have created_at column
+_TABLES_WITH_CREATED_AT = {
+    'entity_nodes',
+    'episodic_nodes',
+    'community_nodes',
+    'saga_nodes',
+    'entity_edges',
+    'episodic_edges',
+    'community_edges',
+}
+
+# Columns to exclude from SELECT * (vector/embedding columns)
+_EXCLUDED_COLUMNS = {
+    'name_embedding',
+    'fact_embedding',
+}
 
 
 def _get_schema(driver: Any) -> str:
@@ -142,30 +159,56 @@ async def get_group_detail(group_id: str, table: str | None = None, page: int = 
             total = table_counts.get(table, 0)
             offset = (page - 1) * size
 
+            # Build SELECT clause excluding embedding columns
+            columns_result, _, _ = await driver.execute_query(
+                f"""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = %(schema)s AND table_name = %(table)s
+                """,
+                params={'schema': schema, 'table': table}
+            )
+            all_columns = [r['column_name'] for r in (columns_result or [])]
+            selected_columns = [c for c in all_columns if c not in _EXCLUDED_COLUMNS]
+            columns_str = ', '.join(f'"{c}"' for c in selected_columns) if selected_columns else '*'
+
+            # Build ORDER BY clause only if table has created_at
+            order_clause = ''
+            if table in _TABLES_WITH_CREATED_AT:
+                order_clause = 'ORDER BY created_at DESC'
+
             query_result, _, _ = await driver.execute_query(
-                f"SELECT * FROM {schema}.{table} WHERE group_id = %(group_id)s ORDER BY created_at DESC OFFSET %(offset)s LIMIT %(limit)s",
+                f"SELECT {columns_str} FROM {schema}.{table} WHERE group_id = %(group_id)s {order_clause} OFFSET %(offset)s LIMIT %(limit)s",
                 params={'group_id': group_id, 'offset': offset, 'limit': size}
             )
 
-            # Convert datetime objects to ISO strings
+            # Convert datetime objects to ISO strings and handle special types
             for record in query_result or []:
                 row = {}
                 for k, v in record.items():
-                    if hasattr(v, 'isoformat'):
+                    if v is None:
+                        row[k] = None
+                    elif hasattr(v, 'isoformat'):
                         row[k] = v.isoformat()
-                    else:
+                    elif isinstance(v, (list, tuple, dict)):
+                        # Convert complex types to JSON string
+                        row[k] = json.dumps(v, default=str)
+                    elif isinstance(v, (int, float, bool)):
                         row[k] = v
+                    else:
+                        # Convert everything else to string
+                        row[k] = str(v)
                 records.append(row)
 
-        return {
+        response_data = {
             'group_id': group_id,
             'table': table,
             'page': page,
             'size': size,
-            'total': total,
-            'table_counts': table_counts,
+            'total': int(total),
+            'table_counts': {k: int(v) for k, v in table_counts.items()},
             'records': records,
         }
+        return Response(content=json.dumps(response_data), media_type='application/json')
     except HTTPException:
         raise
     except Exception as e:

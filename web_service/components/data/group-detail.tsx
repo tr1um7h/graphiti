@@ -95,14 +95,14 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
       document.body.removeChild(a);
     } catch (error) {
       console.error('Export failed:', error);
-      alert('Export failed');
+      alert('导出失败');
     }
   };
 
   if (loading && !detail) {
     return (
       <div className="rounded-lg border bg-card p-8 text-center text-muted-foreground">
-        Loading group details...
+        加载中...
       </div>
     );
   }
@@ -110,7 +110,7 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
   if (!detail) {
     return (
       <div className="rounded-lg border bg-card p-8 text-center text-muted-foreground">
-        Group not found
+        分组不存在
       </div>
     );
   }
@@ -118,10 +118,10 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-xl font-semibold">Group: {groupId}</h3>
+        <h3 className="text-xl font-semibold">分组：{groupId}</h3>
         <Button variant="outline" size="sm" onClick={handleExport}>
           <Download className="h-4 w-4 mr-2" />
-          Export Data
+          导出数据
         </Button>
       </div>
 
@@ -131,13 +131,13 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
             <thead>
               <tr className="border-b bg-muted/50">
                 <th className="px-4 py-3 text-left text-sm font-medium">
-                  Table
+                  表名
                 </th>
                 <th className="px-4 py-3 text-right text-sm font-medium">
-                  Records
+                  记录数
                 </th>
                 <th className="px-4 py-3 text-right text-sm font-medium">
-                  Actions
+                  操作
                 </th>
               </tr>
             </thead>
@@ -164,11 +164,11 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
                         >
                           {isExpanded ? (
                             <>
-                              Collapse <ChevronUp className="h-3 w-3" />
+                              收起 <ChevronUp className="h-3 w-3" />
                             </>
                           ) : (
                             <>
-                              Expand <ChevronDown className="h-3 w-3" />
+                              展开 <ChevronDown className="h-3 w-3" />
                             </>
                           )}
                         </button>
@@ -180,7 +180,7 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
                           <div className="space-y-3">
                             {loading ? (
                               <p className="text-sm text-muted-foreground text-center py-4">
-                                Loading...
+                                加载中...
                               </p>
                             ) : detail.records && detail.records.length > 0 ? (
                               <>
@@ -221,8 +221,8 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
                                 </div>
                                 <div className="flex items-center justify-between text-sm">
                                   <span className="text-muted-foreground">
-                                    Page {detail.page} of{' '}
-                                    {Math.ceil(detail.total / pageSize)}
+                                    第 {detail.page} 页，共{' '}
+                                    {Math.ceil(detail.total / pageSize)} 页
                                   </span>
                                   <div className="flex gap-2">
                                     <Button
@@ -231,7 +231,7 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
                                       disabled={page <= 1}
                                       onClick={() => handlePageChange(page - 1)}
                                     >
-                                      Previous
+                                      上一页
                                     </Button>
                                     <Button
                                       variant="outline"
@@ -241,14 +241,14 @@ export function GroupDetail({ groupId }: GroupDetailProps) {
                                       }
                                       onClick={() => handlePageChange(page + 1)}
                                     >
-                                      Next
+                                      下一页
                                     </Button>
                                   </div>
                                 </div>
                               </>
                             ) : (
                               <p className="text-sm text-muted-foreground text-center py-4">
-                                No records
+                                暂无记录
                               </p>
                             )}
                           </div>
