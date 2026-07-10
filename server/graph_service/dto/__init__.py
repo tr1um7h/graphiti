@@ -25,6 +25,7 @@ from .preview import (
     PreviewMemoryResponse,
     PreviewTaskStatus,
 )
+from .chat import ChatContextDTO, ChatMessageDTO, ChatRequestDTO, ChatResponseDTO
 from .retrieve import FactResult, GetMemoryRequest, GetMemoryResponse, SearchQuery, SearchResults
 from .schemas import (
     AttributeDefinition,
@@ -74,4 +75,9 @@ __all__ = [
     'ExtractionSchemaCreate',
     'ExtractionSchemaResponse',
     'ExtractionSchemaListItem',
+    # Chat DTOs
+    'ChatRequestDTO',
+    'ChatResponseDTO',
+    'ChatContextDTO',
+    'ChatMessageDTO',
 ]
