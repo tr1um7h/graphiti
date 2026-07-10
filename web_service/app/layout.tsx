@@ -3,6 +3,8 @@ import './globals.css';
 import { Sidebar } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
 import Providers from './providers';
+import { ChatDrawer } from '@/components/chat/chat-drawer';
+import { ChatFloatingButton } from '@/components/chat/chat-floating-button';
 
 export const metadata: Metadata = {
   title: 'Graphiti Knowledge Graph',
@@ -24,7 +26,9 @@ export default function RootLayout({
               <Header />
               <main className="flex-1 overflow-auto p-6">{children}</main>
             </div>
+            <ChatDrawer />
           </div>
+          <ChatFloatingButton />
         </Providers>
       </body>
     </html>
