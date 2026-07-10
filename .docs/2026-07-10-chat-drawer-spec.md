@@ -310,21 +310,21 @@ interface ChatState {
 
 ## 搜索优化规范
 
-**状态:** 规划中
+**状态:** Phase 1 + 1.5 已完成
 **日期:** 2026-07-10
 
-### 现状问题
+### 现状问题（根因分析）
 
-Chat 搜索使用 `EDGE_HYBRID_SEARCH_RRF` 配置，组合了两种搜索方式：
+Chat 搜索使用 `EDGE_HYBRID_SEARCH_RRF` 配置，只走 BM25 + cosine 两条 edge 搜索路径。经实证排查（对 test 组 6 条 edge 逐一验证），发现 **4 个根因**导致"有数据却返回空"：
 
-| 搜索方式 | 实现 | 问题 |
-|----------|------|------|
-| **BM25 (fulltext)** | `websearch_to_tsquery('simple', query)` | `simple` 配置不做中文分词，中文句子变成单个 token，匹配不上 |
-| **cosine_similarity** | MiniLM embedding 向量余弦 | MiniLM 对中文语义匹配弱，中英混合 query 与纯英文存储文本距离远 |
+| # | 根因 | 位置 | 实证 |
+|---|------|------|------|
+| **1** | **BM25 多词 AND 语义** | `search_ops.py:139` `websearch_to_tsquery('simple', 'Graphiti pgvector')` → tsquery = `graphiti & pgvector`，要求一条 edge 同时含两词 | 单搜 `Graphiti`→1条，单搜 `pgvector`→1条，合搜→**0条** |
+| **2** | **中文不分词** | 同上，`simple` 配置不做 CJK 分词，整段中文变成无意义 token | `websearch_to_tsquery('simple', '实体是什么关系？')` → **0 条** |
+| **3** | **cosine 阈值过高** | `search_utils.py:65` `DEFAULT_MIN_SCORE = 0.6`，MiniLM 跨概念分数普遍 0.3–0.5 | 最高分 0.5633 < 0.6 → **全部过滤** |
+| **4** | **没有 node 搜索** | `search_config_recipes.py:111` `EDGE_HYBRID_SEARCH_RRF` 只有 `edge_config`，不搜 node | entity 节点从未被发现，无法用于 edge 遍历 |
 
-**典型失败 case**：用户用中文问 "有Sigma.js实体吗？它和Next.js是什么关系？" → embedding 距离远搜不到 → fulltext 又因中文不分词搜不到 → 返回空结果。
-
-当前临时方案：Chat router 里做了英文关键词 fallback（从 query 中提取 `[A-Za-z][\w.\-]+` 模式的词重新搜索），但不够优雅。
+**典型失败 case**：用户问 "Graphiti 和 pgvector 实体是什么关系？" → BM25 AND 语义 0 条 + cosine 阈值过滤 0 条 + node 搜索未配置 → 返回空 → LLM 回答"未找到相关数据"。
 
 ### 优化方案
 
@@ -398,9 +398,32 @@ Chat 搜索使用 `EDGE_HYBRID_SEARCH_RRF` 配置，组合了两种搜索方式�
 ### 推荐路线
 
 ```
-Phase 1 (当前)     → 方案 C：Chat 搜索配置优化 + 关键词 fallback
-Phase 2 (短期)     → 方案 A：BGE-large-zh + COMBINED 搜索
-Phase 3 (中期)     → 方案 B2：应用层 jieba 分词
+Phase 1   (已完成) 方案C：COMBINED配置 + 关键词fallback + 降阈值
+Phase 1.5 (已完成) 实体链接 + 边遍历（sim_min_score 0.6→0.2）
+Phase 2   (短期)   方案A：BGE-large-zh + COMBINED 搜索
+Phase 3   (中期)   方案B2：应用层 jieba 分词 + BM25 AND→OR 修复
 ```
 
-Phase 1 已完成。Phase 2 和 Phase 3 按需推进，每次升级需清库重建索引。
+#### Phase 1.5：实体链接 + 边遍历（已完成）
+
+**核心思路**：用户问"X 和 Y 的关系"时，本质是按名找实体再找连边，而非语义相似度搜索。新增实体链接层绕过 BM25/cosine 的所有缺陷：
+
+1. 加载目标 group 内所有 node name
+2. 反向匹配：query 中出现了哪些已知实体名（+ 英文关键词正向匹配）
+3. SQL 直查连接这些 node 的 edge
+
+**改动文件**：`server/graph_service/routers/chat.py`
+- 新增 `_entity_link_search()` — 实体链接函数
+- 新增 `CHAT_SEARCH_CONFIG` — `sim_min_score` 从 0.6 降至 0.2
+- `chat()` 端点改为：实体链接 + hybrid search 并行 → UUID 去重合并
+
+**验证结果**：
+
+| 查询 | Phase 1 | Phase 1.5 |
+|------|---------|-----------|
+| Graphiti 和 pgvector 实体是什么关系？ | "未找到相关数据" | ✅ 正确描述两者通过 PostgreSQL 生态关联 |
+| Sigma.js 和 Next.js 是什么关系？ | 搜不到 | ✅ 正确识别 Sigma.js 是 Next.js 的图可视化库 |
+| Zustand 是什么？ | 搜不到 | ✅ 正确识别为状态管理库 |
+| 这个项目用了什么技术栈？(纯语义，无实体名) | "未找到" | "暂无相关数据"（需 Phase 2 BGE） |
+
+**局限**：纯语义查询（不含实体名）仍依赖 cosine 通道，MiniLM 跨语言能力不足，需 Phase 2 解决。

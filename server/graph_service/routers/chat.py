@@ -3,10 +3,32 @@ import re
 
 from fastapi import APIRouter, status
 
+from graphiti_core.driver.postgres_age.records import entity_edge_from_row
+from graphiti_core.edges import EntityEdge
+from graphiti_core.search.search_config import (
+    EdgeReranker,
+    EdgeSearchConfig,
+    EdgeSearchMethod,
+    SearchConfig,
+)
 from graph_service.dto.chat import ChatRequestDTO, ChatResponseDTO
 from graph_service.zep_graphiti import ZepGraphitiDep, get_fact_result_from_edge
 
 router = APIRouter()
+
+# Hybrid search config with a lowered cosine similarity threshold.
+# The default 0.6 (DEFAULT_MIN_SCORE) is too high for all-MiniLM-L6-v2,
+# where genuinely relevant cross-concept results often score 0.3-0.5.
+CHAT_SEARCH_CONFIG = SearchConfig(
+    edge_config=EdgeSearchConfig(
+        search_methods=[EdgeSearchMethod.bm25, EdgeSearchMethod.cosine_similarity],
+        reranker=EdgeReranker.rrf,
+        sim_min_score=0.2,
+    ),
+    limit=10,
+)
+
+MAX_CONTEXT_EDGES = 15
 
 CHAT_SYSTEM_PROMPT = """你是一个知识图谱助手。你帮助用户验证和探索他们的知识图谱数据。
 
@@ -62,38 +84,113 @@ def _build_messages(search_text: str, context_info: str, scope_hint: str, histor
     return messages
 
 
+async def _entity_link_search(
+    graphiti: ZepGraphitiDep,
+    query: str,
+    group_ids: list[str] | None,
+) -> list[EntityEdge]:
+    """Find edges by matching entity names in the query to graph nodes,
+    then traversing their connecting edges.
+
+    This bypasses embedding/BM25 limitations entirely. It directly links
+    entity names mentioned in the query to nodes in the target group(s),
+    making it language-independent and robust for "relationship between X
+    and Y" queries where BM25 AND-semantics and embedding thresholds fail.
+    """
+    if not group_ids:
+        return []
+
+    driver = graphiti.driver
+
+    # 1. Load node names + uuids in the target group(s)
+    nodes_result, _, _ = await driver.execute_query(
+        """
+        SELECT uuid, name FROM entity_nodes
+        WHERE group_id = ANY(%(group_ids)s)
+        """,
+        params={'group_ids': group_ids},
+    )
+
+    if not nodes_result:
+        return []
+
+    # 2. Match: which nodes are mentioned in the query?
+    #    (a) Node name appears verbatim in the query — handles Chinese,
+    #        mixed-language, and full-name lookups.
+    #    (b) English/technical keyword from the query matches the node name
+    #        — handles abbreviations and partial matches.
+    query_lower = query.lower()
+    keywords = [kw.lower() for kw in re.findall(r'[A-Za-z][\w.\-]+', query)]
+
+    matched_uuids: set[str] = set()
+    for row in nodes_result:
+        name = (row['name'] or '').strip()
+        if not name:
+            continue
+        name_lower = name.lower()
+        if name_lower in query_lower:
+            matched_uuids.add(row['uuid'])
+        elif any(kw and (kw in name_lower or name_lower in kw) for kw in keywords):
+            matched_uuids.add(row['uuid'])
+
+    if not matched_uuids:
+        return []
+
+    # 3. Find edges connecting matched nodes
+    uuid_list = list(matched_uuids)
+    edges_result, _, _ = await driver.execute_query(
+        """
+        SELECT *
+        FROM entity_edges
+        WHERE group_id = ANY(%(group_ids)s)
+          AND (source_node_uuid = ANY(%(node_uuids)s)
+               OR target_node_uuid = ANY(%(node_uuids)s))
+        LIMIT %(limit)s
+        """,
+        params={'group_ids': group_ids, 'node_uuids': uuid_list, 'limit': MAX_CONTEXT_EDGES},
+    )
+
+    return [entity_edge_from_row(row) for row in (edges_result or [])]
+
+
 @router.post('/chat', status_code=status.HTTP_200_OK)
 async def chat(request: ChatRequestDTO, graphiti: ZepGraphitiDep):
-    # 1. Search graph based on context
+    # 1. Determine search scope from context
     group_ids = None
     ctx = request.context
     if ctx and ctx.context_id and ctx.context_type == 'group':
         group_ids = [ctx.context_id]
 
-    # Search using current message only — concatenating history dilutes
-    # the embedding semantics especially for mixed-language queries
     query = request.message
 
-    relevant_edges = await graphiti.search(
-        group_ids=group_ids,
+    # 2. Entity linking: match entity names in the query to graph nodes,
+    #    then traverse their edges. This is the most reliable path for
+    #    "relationship between X and Y" queries — language-independent
+    #    and unaffected by embedding quality or BM25 AND-semantics.
+    entity_linked_edges = await _entity_link_search(graphiti, query, group_ids)
+
+    # 3. Hybrid search (BM25 + cosine with lowered threshold) as a
+    #    complementary channel for semantic matches that entity linking
+    #    may miss (e.g. queries without specific entity names).
+    hybrid_results = await graphiti.search_(
         query=query,
-        num_results=10,
+        config=CHAT_SEARCH_CONFIG,
+        group_ids=group_ids,
     )
+    hybrid_edges = hybrid_results.edges
 
-    # Fallback: extract English/technical keywords and search again
-    # MiniLM has weak cross-language semantics — a Chinese question about
-    # "Sigma.js" may not embed close to the stored English fact text.
-    if not relevant_edges:
-        keywords = re.findall(r'[A-Za-z][\w.\-]+', query)
-        if keywords:
-            keyword_query = ' '.join(keywords)
-            relevant_edges = await graphiti.search(
-                group_ids=group_ids,
-                query=keyword_query,
-                num_results=10,
-            )
+    # 4. Merge: entity-linked edges first (higher precision), then hybrid
+    #    edges, deduplicated by UUID.
+    seen_uuids: set[str] = set()
+    relevant_edges: list[EntityEdge] = []
+    for edge in entity_linked_edges + hybrid_edges:
+        if edge.uuid not in seen_uuids:
+            seen_uuids.add(edge.uuid)
+            relevant_edges.append(edge)
+            if len(relevant_edges) >= MAX_CONTEXT_EDGES:
+                break
 
-    # 2. Build search results text, context info, and scope hint
+    # 5. Build search results text, context info, and scope hint
     search_text = _build_search_results_text(relevant_edges)
     context_info = _build_context_info(request.context)
     scope_hint = (
@@ -102,7 +199,7 @@ async def chat(request: ChatRequestDTO, graphiti: ZepGraphitiDep):
         else '- 搜索范围：全部分组'
     )
 
-    # 3. Build LLM messages
+    # 6. Build LLM messages
     llm_messages = _build_messages(
         search_text,
         context_info,
@@ -111,7 +208,7 @@ async def chat(request: ChatRequestDTO, graphiti: ZepGraphitiDep):
         request.message,
     )
 
-    # 4. Call LLM
+    # 7. Call LLM
     from graphiti_core.llm_client.config import ModelSize
     from graphiti_core.prompts.models import Message
 
@@ -125,7 +222,7 @@ async def chat(request: ChatRequestDTO, graphiti: ZepGraphitiDep):
         prompt_name='chat_qna',
     )
 
-    # 5. Extract answer text — generate_response returns a parsed dict
+    # 8. Extract answer text — generate_response returns a parsed dict
     answer = response.get('answer', '') or response.get('content', '') or str(response)
 
     return ChatResponseDTO(answer=answer)
