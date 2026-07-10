@@ -7,6 +7,7 @@ import { GraphControls } from '@/components/graph/graph-controls';
 import { GraphLegend } from '@/components/graph/graph-legend';
 import { GraphSearch } from '@/components/graph/graph-search';
 import { useGraphStore } from '@/stores/graph-store';
+import { useChatStore } from '@/stores/chat-store';
 import type { GraphApiResponse } from '@/lib/types';
 
 interface Group {
@@ -30,7 +31,13 @@ export default function GraphPageClient() {
         setGroups(data);
         // Auto-select first group if available
         if (data.length > 0 && !selectedGroup) {
-          setSelectedGroup(data[0].id);
+          const first = data[0];
+          setSelectedGroup(first.id);
+          useChatStore.getState().setContext({
+            context_id: first.id,
+            context_type: 'group',
+            context_name: first.name,
+          });
         }
       })
       .catch((err) => console.error('Failed to load groups:', err));
@@ -53,8 +60,15 @@ export default function GraphPageClient() {
   // Group changed → reload graph
   const handleGroupChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const groupId = e.target.value;
+    const group = groups.find((g) => g.id === groupId);
     setSelectedGroup(groupId);
     useGraphStore.getState().resetFocus();
+    // Sync context to Chat
+    useChatStore.getState().setContext({
+      context_id: groupId,
+      context_type: 'group',
+      context_name: group?.name || groupId,
+    });
   };
 
   // Clear search focus → restore full graph

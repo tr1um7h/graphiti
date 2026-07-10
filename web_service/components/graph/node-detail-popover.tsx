@@ -6,8 +6,9 @@
 import { useEffect, useState } from 'react';
 import type { EntityDetail } from '@/lib/types';
 import { Badge } from '@/components/ui/badge';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, MessageCircle, X } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useChatStore } from '@/stores/chat-store';
 
 interface NodeDetailPopoverProps {
   nodeId: string;
@@ -105,6 +106,19 @@ export function NodeDetailPopover({ nodeId, x, y, onClose }: NodeDetailPopoverPr
                 {detail.summary}
               </p>
             )}
+            <button
+              onClick={() => {
+                useChatStore.getState().open({
+                  context_id: detail.id,
+                  context_type: 'node',
+                  context_name: detail.name,
+                });
+              }}
+              className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+            >
+              <MessageCircle className="h-3.5 w-3.5" />
+              对此节点询问 AI
+            </button>
           </div>
         ) : null}
       </div>
