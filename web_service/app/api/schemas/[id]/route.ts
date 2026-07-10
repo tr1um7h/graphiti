@@ -24,8 +24,7 @@ export async function PUT(
   const { id } = await params;
   try {
     const body = await request.json();
-    const data = await fetchFromBackend({
-      path: `/rest/schemas/${encodeURIComponent(id)}`,
+    const data = await fetchFromBackend(`/rest/schemas/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: JSON.stringify(body),
     });
@@ -45,8 +44,7 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
-    const data = await fetchFromBackend({
-      path: `/rest/schemas/${encodeURIComponent(id)}`,
+    const data = await fetchFromBackend(`/rest/schemas/${encodeURIComponent(id)}`, {
       method: 'DELETE',
     });
     return Response.json(data);

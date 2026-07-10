@@ -132,7 +132,7 @@ export async function DELETE(
 
   try {
     // 后端端点为 /episode/{uuid}（ingest.router 无 /rest 前缀）
-    await fetchFromBackend({ path: `/episode/${encodeURIComponent(id)}`, method: 'DELETE' });
+    await fetchFromBackend(`/episode/${encodeURIComponent(id)}`, { method: 'DELETE' });
     return Response.json({ id, status: 'deleted' });
   } catch (error) {
     console.error('Document delete error:', error);

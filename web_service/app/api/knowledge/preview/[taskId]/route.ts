@@ -14,10 +14,10 @@ export async function GET(
 ) {
   try {
     const { taskId } = await params;
-    const result = await fetchFromBackend<PreviewTaskStatus>({
-      path: `/preview-memory/${encodeURIComponent(taskId)}`,
-      method: 'GET',
-    });
+    const result = await fetchFromBackend<PreviewTaskStatus>(
+      `/preview-memory/${encodeURIComponent(taskId)}`,
+      { method: 'GET' },
+    );
     return Response.json(result);
   } catch (error) {
     console.error('Preview poll error:', error);

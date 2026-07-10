@@ -6,10 +6,10 @@ export async function DELETE(
 ) {
   const { groupId } = await params;
   try {
-    const result = await fetchFromBackend<{ message: string; success: boolean }>({
-      path: `/group/${encodeURIComponent(groupId)}`,
-      method: 'DELETE',
-    });
+    const result = await fetchFromBackend<{ message: string; success: boolean }>(
+      `/group/${encodeURIComponent(groupId)}`,
+      { method: 'DELETE' },
+    );
     return Response.json(result);
   } catch (error) {
     console.error('Delete group error:', error);

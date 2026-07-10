@@ -1,0 +1,45 @@
+# PostgreSQL AGE + pgvector + MiniLM Embedding Service
+#
+# 启动:  docker compose -f docker/dev-services.yml up -d
+# 停止:  docker compose -f docker/dev-services.yml down
+# 清数据: docker compose -f docker/dev-services.yml down -v
+
+services:
+  postgres:
+    build:
+      context: ./postgres-age
+    container_name: graphiti-postgres
+    environment:
+      POSTGRES_USER: graphiti
+      POSTGRES_PASSWORD: graphiti
+      POSTGRES_DB: graphiti
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_age_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U graphiti"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minilm:
+    image: graphiti-minilm:latest
+    container_name: graphiti-minilm
+    environment:
+      - MINILM_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - MINILM_DIM=384
+      - MINILM_DEVICE=cpu
+      - MINILM_MAX_BATCH=64
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  pg_age_data:

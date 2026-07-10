@@ -46,7 +46,7 @@ services:
       - EMBEDDING_API_URL=${EMBEDDING_API_URL:-http://host.docker.internal:8080/v1}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
       # PostgreSQL AGE 数据库配置 — 通过 host.docker.internal 访问宿主机
-      - POSTGRES_AGE_DSN=${POSTGRES_AGE_DSN:-postgresql://graphiti:graphiti@host.docker.internal:55432/graphiti}
+      - POSTGRES_AGE_DSN=${POSTGRES_AGE_DSN:-postgresql://graphiti:graphiti@host.docker.internal:5432/graphiti}
       - POSTGRES_AGE_GRAPH_NAME=${POSTGRES_AGE_GRAPH_NAME:-graphiti}
       - POSTGRES_AGE_EMBEDDING_DIMENSION=${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
       # 服务配置
@@ -65,7 +65,7 @@ services:
     environment:
       # 数据库配置
       - DATABASE_PROVIDER=postgres_age
-      - POSTGRES_AGE_DSN=${POSTGRES_AGE_DSN:-postgresql://graphiti:graphiti@host.docker.internal:55432/graphiti}
+      - POSTGRES_AGE_DSN=${POSTGRES_AGE_DSN:-postgresql://graphiti:graphiti@host.docker.internal:5432/graphiti}
       - POSTGRES_AGE_GRAPH_NAME=${POSTGRES_AGE_GRAPH_NAME:-graphiti}
       - POSTGRES_AGE_EMBEDDING_DIMENSION=${POSTGRES_AGE_EMBEDDING_DIMENSION:-384}
       - GRAPHITI_DELETE_EXISTING=${GRAPHITI_DELETE_EXISTING:-false}

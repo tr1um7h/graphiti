@@ -16,8 +16,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const data = await fetchFromBackend({
-      path: '/rest/schemas',
+    const data = await fetchFromBackend('/rest/schemas', {
       method: 'POST',
       body: JSON.stringify(body),
     });
