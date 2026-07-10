@@ -184,7 +184,9 @@ docker-images/
 *.7z
 *.rar
 
-# Web Service (Next.js)
+# Web Service (Next.js) lib/ — exclude from Python lib/ ignore
+!web_service/lib/
+web_service/.next/
 web_service/.next/
 web_service/node_modules/
 web_service/.env.local

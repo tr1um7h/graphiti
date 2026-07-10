@@ -101,3 +101,28 @@ export interface GraphApiResponse {
   nodes: GraphNode[];
   edges: GraphEdge[];
 }
+
+// ─── Chat Related ───
+
+export interface ChatContext {
+  context_id?: string;       // group_id, node_id, edge_id, document_id
+  context_type?: string;     // 'group' | 'node' | 'edge' | 'document'
+  context_name?: string;     // for display only
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
+export interface ChatRequest {
+  message: string;
+  context: ChatContext;
+  history: ChatMessage[];
+}
+
+export interface ChatResponse {
+  answer: string;
+}
