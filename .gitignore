@@ -192,3 +192,4 @@ web_service/test-results/
 
 # Claude
 .claude
+.worktrees/
