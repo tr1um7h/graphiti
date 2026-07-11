@@ -187,8 +187,8 @@ When working with the MCP server, follow the patterns established in `mcp_server
 
 - **开发机**: Apple Silicon (arm64)
 - **生产环境**: amd64 (linux/amd64)
-- 本地 `docker compose up` 构建的是 arm64 镜像，仅供开发调试
-- 生产部署必须使用 `docker buildx` 构建 amd64 镜像
+- **默认构建**: amd64（docker-compose.yml 已配置 `platform: linux/amd64`）
+- `docker compose up` 构建并运行 amd64 镜像（通过 QEMU 模拟）
 
 ### 构建 amd64 镜像（生产部署）
 
@@ -218,26 +218,28 @@ docker buildx build --platform linux/amd64 \
   -f mcp_server/docker/Dockerfile -t graphiti-mcp-server:amd64 --load .
 ```
 
-### 本地开发（arm64，无需指定 platform）
+### 本地开发（arm64 原生，可选）
+
+默认 `docker compose up` 已使用 amd64。如需 arm64 原生镜像加速本地开发：
 
 ```bash
-# 构建 base 镜像（首次或依赖变更时）
+# 构建 arm64 base 镜像
 docker build -f Dockerfile.base -t graphiti-base:py3.12 .
 docker build -f web_service/Dockerfile.base -t graphiti-web-base:node20 web_service/
 
-# 启动服务
-docker compose --profile all up -d          # 全部启动
-docker compose --profile web-service up -d  # 仅 web-service
+# 临时覆盖 platform 和 BASE_IMAGE 启动
+docker compose --profile web-service up -d --build \
+  --no-deps web-service  # 需手动修改 docker-compose.yml 中的 platform 和 args
 ```
 
 ### 镜像标签约定
 
 | 标签 | 架构 | 用途 |
 |------|------|------|
-| `:latest` | 本地开发机架构（arm64） | 本地开发调试 |
-| `:amd64` | linux/amd64 | 生产环境部署 |
-| `:py3.12` / `:node20` | 本地架构（arm64） | 本地开发基础镜像 |
+| `:latest` | linux/amd64 | 默认，docker compose 使用 |
+| `:amd64` | linux/amd64 | 同 `:latest`，显式标注 |
 | `:py3.12-amd64` / `:node20-amd64` | linux/amd64 | 生产构建基础镜像 |
+| `:py3.12` / `:node20` | arm64（本地） | arm64 本地调试基础镜像 |
 
 ### 验证镜像架构
 
