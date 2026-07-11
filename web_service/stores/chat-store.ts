@@ -12,6 +12,7 @@ function nextId(): string {
 interface ChatState {
   // UI
   isOpen: boolean;
+  isFullscreen: boolean;
 
   // Conversation (in-memory only, lost on refresh)
   messages: ChatMessage[];
@@ -28,14 +29,17 @@ interface ChatState {
   toggle: () => void;
   open: (ctx?: ChatContext) => void;
   close: () => void;
+  toggleFullscreen: () => void;
   sendMessage: (content: string) => Promise<void>;
   clearMessages: () => void;
   setContext: (ctx: Partial<ChatContext>) => void;
+  clearContext: () => void;
   retry: () => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
   isOpen: false,
+  isFullscreen: false,
   messages: [],
   isLoading: false,
   error: null,
@@ -50,7 +54,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       ...(ctx ? { context: { ...get().context, ...ctx } } : {}),
     }),
 
-  close: () => set({ isOpen: false }),
+  close: () => set({ isOpen: false, isFullscreen: false }),
+
+  toggleFullscreen: () => set((s) => ({ isFullscreen: !s.isFullscreen })),
 
   sendMessage: async (content: string) => {
     const { context } = get();
@@ -113,6 +119,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearMessages: () => set({ messages: [], error: null, _lastUserContent: null }),
 
   setContext: (ctx) => set((s) => ({ context: { ...s.context, ...ctx } })),
+
+  clearContext: () => set({ context: {} }),
 
   retry: async () => {
     const { _lastUserContent, messages } = get();

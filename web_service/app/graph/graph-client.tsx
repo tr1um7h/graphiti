@@ -23,6 +23,14 @@ export default function GraphPageClient() {
   // Whether a search-driven focus is active (to show "clear" button)
   const centerNode = useGraphStore((s) => s.centerNode);
 
+  // Clear chat context when leaving the graph page so that group_id
+  // is NOT carried to other pages (Zustand state persists across navigations).
+  useEffect(() => {
+    return () => {
+      useChatStore.getState().clearContext();
+    };
+  }, []);
+
   // Load group list
   useEffect(() => {
     fetch('/api/graph/groups')

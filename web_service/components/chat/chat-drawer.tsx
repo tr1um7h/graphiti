@@ -5,10 +5,11 @@ import { useEffect, useRef } from 'react';
 import { useChatStore } from '@/stores/chat-store';
 import { ChatMessageBubble } from '@/components/chat/chat-message';
 import { ChatInput } from '@/components/chat/chat-input';
-import { X, RefreshCw, Loader2 } from 'lucide-react';
+import { X, RefreshCw, Loader2, Maximize2, Minimize2 } from 'lucide-react';
 
 export function ChatDrawer() {
   const isOpen = useChatStore((s) => s.isOpen);
+  const isFullscreen = useChatStore((s) => s.isFullscreen);
   const messages = useChatStore((s) => s.messages);
   const isLoading = useChatStore((s) => s.isLoading);
   const error = useChatStore((s) => s.error);
@@ -16,6 +17,8 @@ export function ChatDrawer() {
   const close = useChatStore((s) => s.close);
   const clearMessages = useChatStore((s) => s.clearMessages);
   const retry = useChatStore((s) => s.retry);
+  const toggleFullscreen = useChatStore((s) => s.toggleFullscreen);
+  const clearContext = useChatStore((s) => s.clearContext);
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -23,6 +26,16 @@ export function ChatDrawer() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isLoading]);
+
+  // Press Escape to exit fullscreen
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') toggleFullscreen();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [isFullscreen, toggleFullscreen]);
 
   const contextLabel = context.context_name
     ? `${
@@ -40,34 +53,58 @@ export function ChatDrawer() {
 
   return (
     <div
-      className={`flex flex-col border-l bg-background transition-all duration-200 ease-in-out ${
-        isOpen ? 'w-[400px]' : 'w-0 overflow-hidden border-l-0'
-      }`}
+      className={
+        isFullscreen
+          ? 'fixed inset-0 z-50 flex flex-col bg-background'
+          : `flex flex-col border-l bg-background transition-all duration-200 ease-in-out ${
+              isOpen ? 'w-[400px]' : 'w-0 overflow-hidden border-l-0'
+            }`
+      }
     >
       {/* Header */}
       <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
         <h2 className="text-sm font-semibold">Chat</h2>
         <button
           onClick={clearMessages}
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
           aria-label="新对话"
         >
           <RefreshCw className="h-4 w-4" />
         </button>
         <div className="flex-1" />
         <button
-          onClick={close}
-          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="关闭"
+          onClick={toggleFullscreen}
+          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          aria-label={isFullscreen ? '退出全屏' : '全屏'}
+        >
+          {isFullscreen ? (
+            <Minimize2 className="h-4 w-4" />
+          ) : (
+            <Maximize2 className="h-4 w-4" />
+          )}
+        </button>
+        <button
+          onClick={isFullscreen ? toggleFullscreen : close}
+          className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          aria-label={isFullscreen ? '恢复侧栏' : '关闭'}
         >
           <X className="h-4 w-4" />
         </button>
       </div>
 
       {/* Context badge */}
-      <div className="border-b px-4 py-1.5">
-        <span className="text-xs text-muted-foreground">{contextLabel}</span>
-      </div>
+      {(context.context_id || context.context_name) && (
+        <div className="flex items-center gap-1.5 border-b px-4 py-1.5">
+          <span className="flex-1 text-xs text-muted-foreground">{contextLabel}</span>
+          <button
+            onClick={clearContext}
+            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label="清除上下文"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3">

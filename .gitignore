@@ -191,8 +191,10 @@ web_service/.next/
 web_service/node_modules/
 web_service/.env.local
 web_service/test-results/
+.next
 
 # Claude
 .claude
 .worktrees
 .docs
+
