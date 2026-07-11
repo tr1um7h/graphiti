@@ -2,10 +2,23 @@
 # Multi-stage build: 基础镜像预装依赖，此处仅复制源码+构建
 #
 # 前置条件: 需先构建基础镜像
+#   # arm64（本地开发）
 #   docker build -f Dockerfile.base -t graphiti-web-base:node20 .
+#   # amd64（生产环境）
+#   docker buildx build --platform linux/amd64 -f Dockerfile.base -t graphiti-web-base:node20-amd64 --load .
+#
+# 构建业务镜像:
+#   # arm64（本地开发）
+#   docker build -t graphiti-web-service:latest .
+#   # amd64（生产环境）
+#   docker buildx build --platform linux/amd64 \
+#     --build-arg BASE_IMAGE=graphiti-web-base:node20-amd64 \
+#     -t graphiti-web-service:amd64 --load .
+
+ARG BASE_IMAGE=graphiti-web-base:node20
 
 # Stage 1: Build（基于预装依赖的基础镜像）
-FROM graphiti-web-base:node20 AS builder
+FROM ${BASE_IMAGE} AS builder
 
 WORKDIR /app
 

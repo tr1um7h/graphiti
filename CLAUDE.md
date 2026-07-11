@@ -180,3 +180,67 @@ When working with the MCP server, follow the patterns established in `mcp_server
 - Use specific entity type filters (`Preference`, `Procedure`, `Requirement`)
 - Store new information immediately using `add_memory`
 - Follow discovered procedures and respect established preferences
+
+## Deployment
+
+### Architecture
+
+- **开发机**: Apple Silicon (arm64)
+- **生产环境**: amd64 (linux/amd64)
+- 本地 `docker compose up` 构建的是 arm64 镜像，仅供开发调试
+- 生产部署必须使用 `docker buildx` 构建 amd64 镜像
+
+### 构建 amd64 镜像（生产部署）
+
+所有镜像都基于对应的 base 镜像。构建顺序：先 base，再业务镜像。
+
+```bash
+# 1. 基础镜像（仅在依赖变更时需要重建）
+docker buildx build --platform linux/amd64 \
+  -f Dockerfile.base -t graphiti-base:py3.12-amd64 --load .
+
+docker buildx build --platform linux/amd64 \
+  -f web_service/Dockerfile.base -t graphiti-web-base:node20-amd64 --load web_service/
+
+# 2. 业务镜像（每次代码变更后重建）
+# Server
+docker buildx build --platform linux/amd64 \
+  --build-arg BASE_IMAGE=graphiti-base:py3.12-amd64 \
+  -f Dockerfile -t graphiti-server:amd64 --load .
+
+# Web Service
+docker buildx build --platform linux/amd64 \
+  --build-arg BASE_IMAGE=graphiti-web-base:node20-amd64 \
+  -f web_service/Dockerfile -t graphiti-web-service:amd64 --load web_service/
+
+# MCP Server
+docker buildx build --platform linux/amd64 \
+  -f mcp_server/docker/Dockerfile -t graphiti-mcp-server:amd64 --load .
+```
+
+### 本地开发（arm64，无需指定 platform）
+
+```bash
+# 构建 base 镜像（首次或依赖变更时）
+docker build -f Dockerfile.base -t graphiti-base:py3.12 .
+docker build -f web_service/Dockerfile.base -t graphiti-web-base:node20 web_service/
+
+# 启动服务
+docker compose --profile all up -d          # 全部启动
+docker compose --profile web-service up -d  # 仅 web-service
+```
+
+### 镜像标签约定
+
+| 标签 | 架构 | 用途 |
+|------|------|------|
+| `:latest` | 本地开发机架构（arm64） | 本地开发调试 |
+| `:amd64` | linux/amd64 | 生产环境部署 |
+| `:py3.12` / `:node20` | 本地架构（arm64） | 本地开发基础镜像 |
+| `:py3.12-amd64` / `:node20-amd64` | linux/amd64 | 生产构建基础镜像 |
+
+### 验证镜像架构
+
+```bash
+docker inspect <image>:<tag> --format '{{.Architecture}}'
+```
