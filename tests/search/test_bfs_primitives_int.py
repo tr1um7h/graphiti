@@ -103,3 +103,65 @@ async def test_05_bfs_none_origin_returns_empty(bfs_driver, mock_embedder):
     )
 
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_06_bfs_depth_0_raises_value_error(bfs_driver, mock_embedder):
+    """#6: max_depth=0 raises ValueError per _validate_bfs_depth (search_ops.py:531)."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    alice = ctx.nodes['Alice']
+
+    with pytest.raises(ValueError, match='max_depth must be between 1 and 5'):
+        await bfs_driver.search_ops.edge_bfs_search(
+            bfs_driver, [alice], 0, SearchFilters(), [TEST_GROUP], 10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_07_bfs_depth_6_raises_value_error(bfs_driver, mock_embedder):
+    """#7: max_depth=6 raises ValueError."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    alice = ctx.nodes['Alice']
+
+    with pytest.raises(ValueError, match='max_depth must be between 1 and 5'):
+        await bfs_driver.search_ops.edge_bfs_search(
+            bfs_driver, [alice], 6, SearchFilters(), [TEST_GROUP], 10,
+        )
+
+
+@pytest.mark.asyncio
+async def test_08_bfs_directed_no_outgoing_returns_empty(bfs_driver, mock_embedder):
+    """#8: BFS from terminal node (TopZ, no outgoing edges) returns empty → directed."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    topz = ctx.nodes['TopZ']
+
+    results = await bfs_driver.search_ops.edge_bfs_search(
+        bfs_driver, [topz], 3, SearchFilters(), [TEST_GROUP], 10,
+    )
+
+    assert results == []
+    # Reference oracle: TopZ has no outgoing edges at any depth.
+    reachable = await reference_bfs_reachable_edges(bfs_driver, [topz], 3, [TEST_GROUP])
+    assert reachable == set()
+
+
+@pytest.mark.asyncio
+async def test_09_bfs_directed_reverse_traversal_excluded(bfs_driver, mock_embedder):
+    """#9: origin=AcmeCorp, depth=2 → only LOCATED_IN; WORKS_AT (Alice→AcmeCorp) excluded.
+
+    Alice→AcmeCorp is reverse-direction relative to AcmeCorp; BFS does not walk it.
+    """
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    acme = ctx.nodes['AcmeCorp']
+
+    results = await bfs_driver.search_ops.edge_bfs_search(
+        bfs_driver, [acme], 2, SearchFilters(), [TEST_GROUP], 10,
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, results, ctx)
+    edge_names = {e.name for e in results}
+    assert 'LOCATED_IN' in edge_names
+    assert 'WORKS_AT' not in edge_names  # reverse traversal would be required to reach it
+    # Reference oracle confirms Alice is not reachable from AcmeCorp via outgoing edges.
+    reachable_nodes = await reference_bfs_reachable_nodes(bfs_driver, [acme], 2, [TEST_GROUP])
+    assert ctx.nodes['Alice'] not in reachable_nodes
