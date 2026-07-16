@@ -118,8 +118,8 @@ async def create_canonical_tables(
                 name_embedding vector({}),
                 created_at timestamptz NOT NULL,
                 search_vector tsvector GENERATED ALWAYS AS (
-                    setweight(to_tsvector('simple', coalesce(name, '')), 'A') ||
-                    setweight(to_tsvector('simple', coalesce(summary, '')), 'B')
+                    setweight(to_tsvector('jiebacfg', coalesce(name, '')), 'A') ||
+                    setweight(to_tsvector('jiebacfg', coalesce(summary, '')), 'B')
                 ) STORED
             )
             """
@@ -140,9 +140,9 @@ async def create_canonical_tables(
                 episode_metadata jsonb,
                 created_at timestamptz NOT NULL,
                 search_vector tsvector GENERATED ALWAYS AS (
-                    setweight(to_tsvector('simple', coalesce(name, '')), 'A') ||
-                    setweight(to_tsvector('simple', coalesce(content, '')), 'B') ||
-                    setweight(to_tsvector('simple', coalesce(source_description, '')), 'C')
+                    setweight(to_tsvector('jiebacfg', coalesce(name, '')), 'A') ||
+                    setweight(to_tsvector('jiebacfg', coalesce(content, '')), 'B') ||
+                    setweight(to_tsvector('jiebacfg', coalesce(source_description, '')), 'C')
                 ) STORED
             )
             """
@@ -159,8 +159,8 @@ async def create_canonical_tables(
                 name_embedding vector({}),
                 created_at timestamptz NOT NULL,
                 search_vector tsvector GENERATED ALWAYS AS (
-                    setweight(to_tsvector('simple', coalesce(name, '')), 'A') ||
-                    setweight(to_tsvector('simple', coalesce(summary, '')), 'B')
+                    setweight(to_tsvector('jiebacfg', coalesce(name, '')), 'A') ||
+                    setweight(to_tsvector('jiebacfg', coalesce(summary, '')), 'B')
                 ) STORED
             )
             """
@@ -208,8 +208,8 @@ async def create_canonical_tables(
                 attributes jsonb NOT NULL DEFAULT '{{}}',
                 created_at timestamptz NOT NULL,
                 search_vector tsvector GENERATED ALWAYS AS (
-                    setweight(to_tsvector('simple', coalesce(name, '')), 'A') ||
-                    setweight(to_tsvector('simple', coalesce(fact, '')), 'B')
+                    setweight(to_tsvector('jiebacfg', coalesce(name, '')), 'A') ||
+                    setweight(to_tsvector('jiebacfg', coalesce(fact, '')), 'B')
                 ) STORED
             )
             """
