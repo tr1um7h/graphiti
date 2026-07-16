@@ -182,7 +182,7 @@ async def test_10_bfs_respects_group_filter_walk_only(bfs_driver, mock_embedder)
         assert e.group_id == TEST_GROUP
     # All G2 edges are out of scope
     g2_edge_uuids = {
-        edge.uuid for key, edge in ctx.edges.items() if edge.group_id == TEST_GROUP_2
+        edge.uuid for _, edge in ctx.edges.items() if edge.group_id == TEST_GROUP_2
     }
     returned_uuids = {e.uuid for e in results}
     assert returned_uuids.isdisjoint(g2_edge_uuids)

@@ -14,7 +14,6 @@ Topology (per spec §4):
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
 
 from graphiti_core.driver.driver import GraphDriver
 from graphiti_core.edges import EntityEdge
