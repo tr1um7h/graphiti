@@ -41,7 +41,11 @@ async def test_01_bfs_explicit_origin_returns_direct_neighbors(bfs_driver, mock_
 
 @pytest.mark.asyncio
 async def test_02_bfs_depth_3_traverses_full_chain(bfs_driver, mock_embedder):
-    """#2: origin=Alice, depth=3 → WORKS_AT + LOCATED_IN + IN_COUNTRY (3 edges)."""
+    """#2: origin=Alice, depth=3 → WORKS_AT + HAS_SALARY + LOCATED_IN + IN_COUNTRY (4 edges).
+
+    Alice has two outgoing edges: WORKS_AT (→AcmeCorp) and HAS_SALARY (→SalaryNode).
+    BFS from Alice at depth=3 traverses all reachable edges within 3 hops.
+    """
     ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
     alice = ctx.nodes['Alice']
 
@@ -49,15 +53,15 @@ async def test_02_bfs_depth_3_traverses_full_chain(bfs_driver, mock_embedder):
         bfs_driver, [alice], 3, SearchFilters(), [TEST_GROUP], 10,
     )
 
-    assert len(results) == 3
+    assert len(results) == 4
     await assert_returned_edges_well_formed(bfs_driver, results, ctx)
     edge_names = {e.name for e in results}
-    assert edge_names == {'WORKS_AT', 'LOCATED_IN', 'IN_COUNTRY'}
+    assert edge_names == {'WORKS_AT', 'HAS_SALARY', 'LOCATED_IN', 'IN_COUNTRY'}
 
 
 @pytest.mark.asyncio
 async def test_03_bfs_depth_1_excludes_far_nodes(bfs_driver, mock_embedder):
-    """#3: origin=Alice, depth=1 → only WORKS_AT; LOCATED_IN / IN_COUNTRY out of range."""
+    """#3: origin=Alice, depth=1 → WORKS_AT + HAS_SALARY; LOCATED_IN / IN_COUNTRY out of range."""
     ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
     alice = ctx.nodes['Alice']
 
@@ -65,8 +69,9 @@ async def test_03_bfs_depth_1_excludes_far_nodes(bfs_driver, mock_embedder):
         bfs_driver, [alice], 1, SearchFilters(), [TEST_GROUP], 10,
     )
 
-    assert len(results) == 1
-    assert results[0].name == 'WORKS_AT'
+    assert len(results) == 2
+    edge_names = {e.name for e in results}
+    assert edge_names == {'WORKS_AT', 'HAS_SALARY'}
     await assert_returned_edges_well_formed(bfs_driver, results, ctx)
     # Reference oracle confirms SF and USA are not 1-hop reachable from Alice.
     reachable = await reference_bfs_reachable_edges(bfs_driver, [alice], 1, [TEST_GROUP])

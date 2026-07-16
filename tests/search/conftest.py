@@ -100,8 +100,52 @@ async def bfs_driver() -> AsyncIterator[PostgresAgeDriver]:
 import tests.helpers_test as helpers
 from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
 
+import numpy as np
+
+# Build deterministic mock embeddings for all BFS fixture node names + edge facts.
+# Uses a fixed seed so results are reproducible across runs.
+_BFS_NAMES = [
+    # G1 nodes
+    'Alice', 'AcmeCorp', 'SanFrancisco', 'USA',
+    'SinkX', 'MidY', 'TopZ',
+    'LeadBob', 'EmpCarol', 'EmpDave', 'EmpEve',
+    'NodeA1', 'NodeA2', 'NodeA3',
+    'NodeB1', 'NodeB2', 'NodeB3',
+    'Q1', 'Q2', 'Q3', 'Q4', 'Q5',
+    'OldEvent', 'NewEvent', '2020Anchor', '2025Anchor',
+    'SalaryNode',
+    # G2 nodes
+    'Alice2', 'AcmeCorp2', 'SanFrancisco2', 'USA2',
+    'SinkX2', 'MidY2', 'TopZ2',
+]
+# Edge fact strings (matching _edge() default: '{src} {edge_name} {dst}')
+_BFS_EDGE_NAMES = [
+    'Alice WORKS_AT AcmeCorp', 'AcmeCorp LOCATED_IN SanFrancisco',
+    'SanFrancisco IN_COUNTRY USA',
+    'SinkX BELONGS_TO MidY', 'MidY PART_OF TopZ',
+    'LeadBob MANAGES EmpCarol', 'LeadBob MANAGES EmpDave', 'LeadBob MANAGES EmpEve',
+    'NodeA1 RELATED NodeA2', 'NodeA2 RELATED NodeA3', 'NodeA3 RELATED NodeA1',
+    'NodeB1 RELATED NodeB2', 'NodeB2 RELATED NodeB3', 'NodeB3 RELATED NodeB1',
+    'OldEvent OCCURRED_ON 2020Anchor', 'NewEvent OCCURRED_ON 2025Anchor',
+    'Alice HAS_SALARY SalaryNode',
+    # Clique Q (10 edges)
+    'Q1 LINKED Q2', 'Q1 LINKED Q3', 'Q1 LINKED Q4', 'Q1 LINKED Q5',
+    'Q2 LINKED Q3', 'Q2 LINKED Q4', 'Q2 LINKED Q5',
+    'Q3 LINKED Q4', 'Q3 LINKED Q5', 'Q4 LINKED Q5',
+    # G2 edges
+    'Alice2 WORKS_AT AcmeCorp2', 'AcmeCorp2 LOCATED_IN SanFrancisco2',
+    'SanFrancisco2 IN_COUNTRY USA2',
+    'SinkX2 BELONGS_TO MidY2', 'MidY2 PART_OF TopZ2',
+]
+_rng = np.random.RandomState(42)
+_BFS_EMBEDDINGS = {
+    name: _rng.uniform(0.0, 0.9, 384).tolist()
+    for name in _BFS_NAMES + _BFS_EDGE_NAMES
+}
+
 # Query strings used by mock-embedder tests (semantic-class tests go through real_embedder).
 MOCK_QUERY_EMBEDDINGS = {
+    **_BFS_EMBEDDINGS,
     'LeadBob 的下属': [0.2] * 384,
     'NodeA1 相关节点': [0.4] * 384,
     'OCCURRED_ON': [0.6] * 384,
@@ -126,9 +170,23 @@ def extend_mock_embedder_dict():
 
 @pytest.fixture
 def mock_embedder():
-    """Re-export of helpers_test.mock_embedder (object is request-scoped)."""
-    from tests.helpers_test import mock_embedder as _mock
-    return _mock
+    """Mock embedder using the extended helpers.embeddings dict."""
+    from unittest.mock import Mock
+    from graphiti_core.embedder.client import EmbedderClient
+
+    mock_model = Mock(spec=EmbedderClient)
+
+    def mock_embed(input_data):
+        if isinstance(input_data, str):
+            return helpers.embeddings[input_data]
+        elif isinstance(input_data, list):
+            combined_input = ' '.join(input_data)
+            return helpers.embeddings[combined_input]
+        else:
+            raise ValueError(f'Unsupported input type: {type(input_data)}')
+
+    mock_model.create.side_effect = mock_embed
+    return mock_model
 
 
 @pytest.fixture
