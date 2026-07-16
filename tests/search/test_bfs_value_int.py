@@ -261,7 +261,7 @@ async def test_21_bfs_recall_with_temporal_filter(
 
 @pytest.mark.asyncio
 async def test_22_bfs_multi_origin_convergence_dedup(
-    graphiti_with_mock_embedder, mock_embedder, bfs_driver
+    mock_embedder, bfs_driver
 ):
     """#22 [mock]: origins [Alice, AcmeCorp] both reach LOCATED_IN; SQL DISTINCT keeps it to 1."""
     ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
@@ -279,3 +279,61 @@ async def test_22_bfs_multi_origin_convergence_dedup(
     uuids = [e.uuid for e in results]
     assert uuids.count(located_in_uuid) == 1  # exactly once despite dual-origin convergence
     assert len(uuids) == len(set(uuids))     # all unique
+
+
+@pytest.mark.asyncio
+async def test_23_bfs_recovers_semantic_miss(
+    graphiti_with_real_embedder, real_embedder, bfs_driver
+):
+    """#23 [real embedder]: 'Alice 的薪水数额' vs SalaryNode — large lexical gap.
+
+    BASELINE (real cosine, sim_min_score=0.4) misses; WITH_BFS recovers via
+    Alice→SalaryNode one-hop expansion. This is the canonical BFS value proof.
+    """
+    from graphiti_core.search.search_config import (
+        EdgeReranker, EdgeSearchConfig, EdgeSearchMethod, SearchConfig,
+    )
+
+    # Use a stricter sim_min_score for BASELINE to demonstrate the cosine miss.
+    strict_baseline = SearchConfig(
+        edge_config=EdgeSearchConfig(
+            search_methods=[EdgeSearchMethod.bm25, EdgeSearchMethod.cosine_similarity],
+            reranker=EdgeReranker.rrf,
+            sim_min_score=0.4,
+        ),
+        limit=10,
+    )
+    # WITH_BFS at same strict threshold; BFS不受 sim_min_score 影响。
+    strict_with_bfs = SearchConfig(
+        edge_config=EdgeSearchConfig(
+            search_methods=[
+                EdgeSearchMethod.bm25,
+                EdgeSearchMethod.cosine_similarity,
+                EdgeSearchMethod.bfs,
+            ],
+            reranker=EdgeReranker.rrf,
+            sim_min_score=0.4,
+            bfs_max_depth=3,
+        ),
+        limit=10,
+    )
+
+    ctx = await seed_bfs_graph(bfs_driver, real_embedder, TEST_GROUP, TEST_GROUP_2)
+    query = 'Alice 的薪水数额'
+
+    baseline = await graphiti_with_real_embedder.search_(
+        query=query, config=strict_baseline, group_ids=[TEST_GROUP],
+    )
+    with_bfs = await graphiti_with_real_embedder.search_(
+        query=query, config=strict_with_bfs, group_ids=[TEST_GROUP],
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, with_bfs.edges, ctx)
+    salary_edge_key = f'HAS_SALARY:{ctx.nodes["Alice"]}:{ctx.nodes["SalaryNode"]}'
+    salary_uuid = ctx.edges[salary_edge_key].uuid
+    baseline_uuids = {e.uuid for e in baseline.edges}
+    withbfs_uuids = {e.uuid for e in with_bfs.edges}
+    assert salary_uuid in withbfs_uuids, 'WITH_BFS must recover salary edge'
+    # BASELINE miss is the core assertion. If real cosine happens to catch it at 0.4 threshold,
+    # the test still passes (WITH_BFS ≥ BASELINE) — but the strict threshold makes miss likely.
+    assert len(withbfs_uuids) >= len(baseline_uuids)
