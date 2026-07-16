@@ -58,6 +58,20 @@ class Settings(BaseSettings):
     # --- Server -----------------------------------------------------------
     port: int = Field(default=8000, description='Server listen port')
 
+    # --- Chat Search Configuration ----------------------------------------
+    chat_sim_min_score: float = Field(
+        default=0.2,
+        description='Cosine similarity threshold for chat search (lower = more results, noisier)',
+    )
+    chat_search_limit: int = Field(
+        default=10,
+        description='Max edges returned per search channel in chat',
+    )
+    chat_bfs_max_depth: int = Field(
+        default=3,
+        description='BFS traversal depth for chat search (1-5)',
+    )
+
     model_config = SettingsConfigDict(env_file='.env', extra='ignore')
 
 

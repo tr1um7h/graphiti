@@ -9,24 +9,50 @@ from graphiti_core.search.search_config import (
     EdgeReranker,
     EdgeSearchConfig,
     EdgeSearchMethod,
+    NodeReranker,
+    NodeSearchConfig,
+    NodeSearchMethod,
     SearchConfig,
 )
 from graph_service.dto.chat import ChatRequestDTO, ChatResponseDTO
 from graph_service.zep_graphiti import ZepGraphitiDep, get_fact_result_from_edge
+from graph_service.config import get_settings
+
+
+def _build_chat_search_config() -> SearchConfig:
+    """Build SearchConfig from environment-configured parameters."""
+    s = get_settings()
+    return SearchConfig(
+        edge_config=EdgeSearchConfig(
+            search_methods=[
+                EdgeSearchMethod.bm25,
+                EdgeSearchMethod.cosine_similarity,
+                EdgeSearchMethod.bfs,
+            ],
+            reranker=EdgeReranker.rrf,
+            sim_min_score=s.chat_sim_min_score,
+            bfs_max_depth=s.chat_bfs_max_depth,
+        ),
+        node_config=NodeSearchConfig(
+            search_methods=[
+                NodeSearchMethod.bm25,
+                NodeSearchMethod.cosine_similarity,
+                NodeSearchMethod.bfs,
+            ],
+            reranker=NodeReranker.rrf,
+            sim_min_score=s.chat_sim_min_score,
+            bfs_max_depth=s.chat_bfs_max_depth,
+        ),
+        limit=s.chat_search_limit,
+    )
 
 router = APIRouter()
 
-# Hybrid search config with a lowered cosine similarity threshold.
-# The default 0.6 (DEFAULT_MIN_SCORE) is too high for all-MiniLM-L6-v2,
-# where genuinely relevant cross-concept results often score 0.3-0.5.
-CHAT_SEARCH_CONFIG = SearchConfig(
-    edge_config=EdgeSearchConfig(
-        search_methods=[EdgeSearchMethod.bm25, EdgeSearchMethod.cosine_similarity],
-        reranker=EdgeReranker.rrf,
-        sim_min_score=0.2,
-    ),
-    limit=10,
-)
+# Search config is built per-request via _build_chat_search_config().
+# Override defaults via .env:
+#   CHAT_SIM_MIN_SCORE  — cosine similarity threshold (default 0.2)
+#   CHAT_SEARCH_LIMIT   — max edges per search channel (default 10)
+#   CHAT_BFS_MAX_DEPTH  — BFS traversal depth (default 3)
 
 MAX_CONTEXT_EDGES = 15
 
@@ -169,12 +195,12 @@ async def chat(request: ChatRequestDTO, graphiti: ZepGraphitiDep):
     #    and unaffected by embedding quality or BM25 AND-semantics.
     entity_linked_edges = await _entity_link_search(graphiti, query, group_ids)
 
-    # 3. Hybrid search (BM25 + cosine with lowered threshold) as a
+    # 3. Hybrid search (BM25 + cosine + BFS) as a
     #    complementary channel for semantic matches that entity linking
     #    may miss (e.g. queries without specific entity names).
     hybrid_results = await graphiti.search_(
         query=query,
-        config=CHAT_SEARCH_CONFIG,
+        config=_build_chat_search_config(),
         group_ids=group_ids,
     )
     hybrid_edges = hybrid_results.edges
