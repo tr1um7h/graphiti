@@ -165,3 +165,65 @@ async def test_09_bfs_directed_reverse_traversal_excluded(bfs_driver, mock_embed
     # Reference oracle confirms Alice is not reachable from AcmeCorp via outgoing edges.
     reachable_nodes = await reference_bfs_reachable_nodes(bfs_driver, [acme], 2, [TEST_GROUP])
     assert ctx.nodes['Alice'] not in reachable_nodes
+
+
+@pytest.mark.asyncio
+async def test_10_bfs_respects_group_filter_walk_only(bfs_driver, mock_embedder):
+    """#10: BFS in G1 never reaches G2 edges; walk_group_ids constrains traversal itself."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    alice_g1 = ctx.nodes['Alice']
+
+    results = await bfs_driver.search_ops.edge_bfs_search(
+        bfs_driver, [alice_g1], 3, SearchFilters(), [TEST_GROUP], 10,
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, results, ctx)
+    for e in results:
+        assert e.group_id == TEST_GROUP
+    # All G2 edges are out of scope
+    g2_edge_uuids = {
+        edge.uuid for key, edge in ctx.edges.items() if edge.group_id == TEST_GROUP_2
+    }
+    returned_uuids = {e.uuid for e in results}
+    assert returned_uuids.isdisjoint(g2_edge_uuids)
+
+
+@pytest.mark.asyncio
+async def test_11_bfs_honors_edge_types_filter(bfs_driver, mock_embedder):
+    """#11: edge_types=['WORKS_AT'] filters BFS results to WORKS_AT edges only."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    alice = ctx.nodes['Alice']
+    edge_type_filter = SearchFilters(edge_types=['WORKS_AT'])
+
+    results = await bfs_driver.search_ops.edge_bfs_search(
+        bfs_driver, [alice], 3, edge_type_filter, [TEST_GROUP], 10,
+    )
+
+    assert len(results) == 1
+    assert results[0].name == 'WORKS_AT'
+    await assert_returned_edges_well_formed(bfs_driver, results, ctx)
+
+
+@pytest.mark.asyncio
+async def test_12_bfs_node_search_excludes_origin(bfs_driver, mock_embedder):
+    """#12: node_bfs from Alice at depth=3 returns AcmeCorp/SF/USA; Alice excluded.
+
+    Contrasts with edge_bfs: node_bfs filter is `walk.depth > 0` (origin excluded);
+    edge_bfs filter is `walk.depth < max_depth` (origin's outgoing edges included).
+    """
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    alice = ctx.nodes['Alice']
+
+    results = await bfs_driver.search_ops.node_bfs_search(
+        bfs_driver, [alice], SearchFilters(), 3, [TEST_GROUP], 10,
+    )
+
+    returned_uuids = {n.uuid for n in results}
+    assert alice not in returned_uuids, 'Origin node must not appear in node_bfs results'
+    expected_reachable = {
+        ctx.nodes['AcmeCorp'], ctx.nodes['SanFrancisco'], ctx.nodes['USA'],
+    }
+    assert expected_reachable.issubset(returned_uuids)
+    # Reference oracle cross-check
+    oracle = await reference_bfs_reachable_nodes(bfs_driver, [alice], 3, [TEST_GROUP])
+    assert returned_uuids.issubset(oracle)
