@@ -31,9 +31,9 @@ class PostgresAgeSearchOperations(SearchOperations):
             f"""
             SELECT *
             FROM entity_nodes
-            WHERE search_vector @@ websearch_to_tsquery('simple', %(query)s)
+            WHERE search_vector @@ websearch_to_tsquery('jiebacfg', %(query)s)
             {where}
-            ORDER BY ts_rank(search_vector, websearch_to_tsquery('simple', %(query)s)) DESC,
+            ORDER BY ts_rank(search_vector, websearch_to_tsquery('jiebacfg', %(query)s)) DESC,
                      uuid
             LIMIT %(limit)s
             """,
@@ -136,9 +136,9 @@ class PostgresAgeSearchOperations(SearchOperations):
             f"""
             SELECT *
             FROM entity_edges
-            WHERE search_vector @@ websearch_to_tsquery('simple', %(query)s)
+            WHERE search_vector @@ websearch_to_tsquery('jiebacfg', %(query)s)
             {where}
-            ORDER BY ts_rank(search_vector, websearch_to_tsquery('simple', %(query)s)) DESC,
+            ORDER BY ts_rank(search_vector, websearch_to_tsquery('jiebacfg', %(query)s)) DESC,
                      uuid
             LIMIT %(limit)s
             """,
@@ -249,9 +249,9 @@ class PostgresAgeSearchOperations(SearchOperations):
             f"""
             SELECT *
             FROM episodic_nodes
-            WHERE search_vector @@ websearch_to_tsquery('simple', %(query)s)
+            WHERE search_vector @@ websearch_to_tsquery('jiebacfg', %(query)s)
             {where}
-            ORDER BY ts_rank(search_vector, websearch_to_tsquery('simple', %(query)s)) DESC,
+            ORDER BY ts_rank(search_vector, websearch_to_tsquery('jiebacfg', %(query)s)) DESC,
                      uuid
             LIMIT %(limit)s
             """,
@@ -273,9 +273,9 @@ class PostgresAgeSearchOperations(SearchOperations):
             f"""
             SELECT *
             FROM community_nodes
-            WHERE search_vector @@ websearch_to_tsquery('simple', %(query)s)
+            WHERE search_vector @@ websearch_to_tsquery('jiebacfg', %(query)s)
             {where}
-            ORDER BY ts_rank(search_vector, websearch_to_tsquery('simple', %(query)s)) DESC,
+            ORDER BY ts_rank(search_vector, websearch_to_tsquery('jiebacfg', %(query)s)) DESC,
                      uuid
             LIMIT %(limit)s
             """,

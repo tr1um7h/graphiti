@@ -67,8 +67,8 @@ class PostgresAgeSpike:
                             name_embedding vector(3),
                             created_at timestamptz NOT NULL DEFAULT now(),
                             search_vector tsvector GENERATED ALWAYS AS (
-                                setweight(to_tsvector('simple', name), 'A')
-                                || setweight(to_tsvector('simple', summary), 'B')
+                                setweight(to_tsvector('jiebacfg', name), 'A')
+                                || setweight(to_tsvector('jiebacfg', summary), 'B')
                             ) STORED
                         )
                         """
@@ -87,8 +87,8 @@ class PostgresAgeSpike:
                             fact_embedding vector(3),
                             created_at timestamptz NOT NULL DEFAULT now(),
                             search_vector tsvector GENERATED ALWAYS AS (
-                                setweight(to_tsvector('simple', name), 'A')
-                                || setweight(to_tsvector('simple', fact), 'B')
+                                setweight(to_tsvector('jiebacfg', name), 'A')
+                                || setweight(to_tsvector('jiebacfg', fact), 'B')
                             ) STORED
                         )
                         """
@@ -391,8 +391,8 @@ class PostgresAgeSpike:
                 """
                 SELECT uuid
                 FROM public.spike_entity_nodes
-                WHERE search_vector @@ websearch_to_tsquery('simple', %(query)s)
-                ORDER BY ts_rank(search_vector, websearch_to_tsquery('simple', %(query)s)) DESC,
+                WHERE search_vector @@ websearch_to_tsquery('jiebacfg', %(query)s)
+                ORDER BY ts_rank(search_vector, websearch_to_tsquery('jiebacfg', %(query)s)) DESC,
                     uuid
                 LIMIT %(limit)s
                 """,
