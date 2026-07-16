@@ -1,8 +1,10 @@
 # tests/search/helpers.py
 """Verification helpers: field equality, DB round-trip, reference BFS oracle."""
+import pytest
+
 from graphiti_core.driver.driver import GraphDriver
 from graphiti_core.edges import EntityEdge
-
+from graphiti_core.nodes import EntityNode
 from tests.search.seed import BFSGraphContext
 
 
@@ -138,3 +140,56 @@ async def assert_returned_edges_well_formed(
         assert key is not None, f'returned edge not in seed: {edge.uuid} name={edge.name}'
         assert_edge_matches_seed(edge, key, ctx)
         await assert_edge_in_db(driver, edge.uuid, key, ctx)
+
+
+# ---- E2E helpers (for LLM-extracted graphs with non-deterministic naming) ----
+
+
+async def find_nodes_by_name_substr(
+    driver: GraphDriver, group_id: str, name_substr: str
+) -> list[EntityNode]:
+    """Query DB for entity nodes whose name contains name_substr (case-insensitive).
+
+    Handles non-deterministic LLM entity names after add_episode().
+    """
+    records, _, _ = await driver.execute_query(
+        """
+        SELECT * FROM entity_nodes
+        WHERE group_id = %(group_id)s
+          AND name ILIKE %(pattern)s
+        """,
+        params={'group_id': group_id, 'pattern': f'%{name_substr}%'},
+        routing_='r',
+    )
+    return [EntityNode(**dict(record)) for record in records]
+
+
+async def find_edges_by_fact_substr(
+    driver: GraphDriver, group_id: str, fact_substr: str
+) -> list[EntityEdge]:
+    """Query DB for entity edges whose fact contains fact_substr (case-insensitive)."""
+    records, _, _ = await driver.execute_query(
+        """
+        SELECT * FROM entity_edges
+        WHERE group_id = %(group_id)s
+          AND fact ILIKE %(pattern)s
+        """,
+        params={'group_id': group_id, 'pattern': f'%{fact_substr}%'},
+        routing_='r',
+    )
+    return [EntityEdge(**dict(record)) for record in records]
+
+
+def assert_edges_contain_keyword(
+    edges: list[EntityEdge], keywords: list[str], msg: str = ''
+) -> None:
+    """Assert at least one edge fact contains one of the given keywords (case-insensitive)."""
+    facts_lower = [e.fact.lower() for e in edges]
+    for kw in keywords:
+        for fact in facts_lower:
+            if kw.lower() in fact:
+                return
+    pytest.fail(
+        f'No edge fact contains any of {keywords}. {msg}. '
+        f'Facts: {facts_lower}'
+    )

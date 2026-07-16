@@ -2,6 +2,7 @@
 """Fixtures and SearchConfigs for the BFS integration test suite."""
 import os
 from collections.abc import AsyncIterator
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -9,7 +10,13 @@ pytest.importorskip('psycopg')
 pytest.importorskip('psycopg_pool')
 pytest.importorskip('pgvector')
 
+from graphiti_core.cross_encoder.client import CrossEncoderClient
 from graphiti_core.driver.postgres_age import PostgresAgeDriver
+from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
+from graphiti_core.graphiti import Graphiti
+from graphiti_core.llm_client import LLMClient
+from graphiti_core.llm_client.config import LLMConfig
+from graphiti_core.llm_client.openai_generic_client import OpenAIGenericClient
 from graphiti_core.search.search_config import (
     EdgeReranker,
     EdgeSearchConfig,
@@ -23,6 +30,7 @@ from graphiti_core.utils.maintenance.graph_data_operations import clear_data
 
 TEST_GROUP = 'bfs_test_group'
 TEST_GROUP_2 = 'bfs_test_group_2'
+E2E_TEST_GROUP = 'bfs_e2e_deepseek'
 
 # Baseline: BM25 + cosine only (current CHAT_SEARCH_CONFIG shape).
 BASELINE_CONFIG = SearchConfig(
@@ -97,111 +105,39 @@ async def bfs_driver() -> AsyncIterator[PostgresAgeDriver]:
         await driver.close()
 
 
-import tests.helpers_test as helpers
-from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
-
-import numpy as np
-
-# Build deterministic mock embeddings for all BFS fixture node names + edge facts.
-# Uses a fixed seed so results are reproducible across runs.
-_BFS_NAMES = [
-    # G1 nodes
-    'Alice', 'AcmeCorp', 'SanFrancisco', 'USA',
-    'SinkX', 'MidY', 'TopZ',
-    'LeadBob', 'EmpCarol', 'EmpDave', 'EmpEve',
-    'NodeA1', 'NodeA2', 'NodeA3',
-    'NodeB1', 'NodeB2', 'NodeB3',
-    'Q1', 'Q2', 'Q3', 'Q4', 'Q5',
-    'OldEvent', 'NewEvent', '2020Anchor', '2025Anchor',
-    'SalaryNode',
-    # G2 nodes
-    'Alice2', 'AcmeCorp2', 'SanFrancisco2', 'USA2',
-    'SinkX2', 'MidY2', 'TopZ2',
-]
-# Edge fact strings (matching _edge() default: '{src} {edge_name} {dst}')
-_BFS_EDGE_NAMES = [
-    'Alice WORKS_AT AcmeCorp', 'AcmeCorp LOCATED_IN SanFrancisco',
-    'SanFrancisco IN_COUNTRY USA',
-    'SinkX BELONGS_TO MidY', 'MidY PART_OF TopZ',
-    'LeadBob MANAGES EmpCarol', 'LeadBob MANAGES EmpDave', 'LeadBob MANAGES EmpEve',
-    'NodeA1 RELATED NodeA2', 'NodeA2 RELATED NodeA3', 'NodeA3 RELATED NodeA1',
-    'NodeB1 RELATED NodeB2', 'NodeB2 RELATED NodeB3', 'NodeB3 RELATED NodeB1',
-    'OldEvent OCCURRED_ON 2020Anchor', 'NewEvent OCCURRED_ON 2025Anchor',
-    'Alice HAS_SALARY SalaryNode',
-    # Clique Q (10 edges)
-    'Q1 LINKED Q2', 'Q1 LINKED Q3', 'Q1 LINKED Q4', 'Q1 LINKED Q5',
-    'Q2 LINKED Q3', 'Q2 LINKED Q4', 'Q2 LINKED Q5',
-    'Q3 LINKED Q4', 'Q3 LINKED Q5', 'Q4 LINKED Q5',
-    # G2 edges
-    'Alice2 WORKS_AT AcmeCorp2', 'AcmeCorp2 LOCATED_IN SanFrancisco2',
-    'SanFrancisco2 IN_COUNTRY USA2',
-    'SinkX2 BELONGS_TO MidY2', 'MidY2 PART_OF TopZ2',
-]
-_rng = np.random.RandomState(42)
-_BFS_EMBEDDINGS = {
-    name: _rng.uniform(0.0, 0.9, 384).tolist()
-    for name in _BFS_NAMES + _BFS_EDGE_NAMES
-}
-
-# Query strings used by mock-embedder tests (semantic-class tests go through real_embedder).
-MOCK_QUERY_EMBEDDINGS = {
-    **_BFS_EMBEDDINGS,
-    'LeadBob 的下属': [0.2] * 384,
-    'NodeA1 相关节点': [0.4] * 384,
-    'OCCURRED_ON': [0.6] * 384,
-    'Q1': [0.5] * 384,
-    'Alice WORKS_AT AcmeCorp': [0.7] * 384,
-    'AcmeCorp LOCATED_IN SanFrancisco': [0.8] * 384,
-}
-
-
-@pytest.fixture(autouse=True)
-def extend_mock_embedder_dict():
-    """Locally extend helpers.embeddings for the duration of each test,
-    then restore. Does not modify tests/helpers_test.py."""
-    saved = dict(helpers.embeddings)
-    helpers.embeddings.update(MOCK_QUERY_EMBEDDINGS)
-    try:
-        yield
-    finally:
-        helpers.embeddings.clear()
-        helpers.embeddings.update(saved)
-
-
-@pytest.fixture
-def mock_embedder():
-    """Mock embedder using the extended helpers.embeddings dict."""
-    from unittest.mock import Mock
-    from graphiti_core.embedder.client import EmbedderClient
-
-    mock_model = Mock(spec=EmbedderClient)
-
-    def mock_embed(input_data):
-        if isinstance(input_data, str):
-            return helpers.embeddings[input_data]
-        elif isinstance(input_data, list):
-            combined_input = ' '.join(input_data)
-            return helpers.embeddings[combined_input]
-        else:
-            raise ValueError(f'Unsupported input type: {type(input_data)}')
-
-    mock_model.create.side_effect = mock_embed
-    return mock_model
-
-
 @pytest.fixture
 def real_embedder():
-    """Real OpenAI embedder; skip cleanly when OPENAI_API_KEY is unset."""
-    if not os.getenv('OPENAI_API_KEY'):
-        pytest.skip('OPENAI_API_KEY not set; skipping real-embedder BFS test')
-    return OpenAIEmbedder(config=OpenAIEmbedderConfig(embedding_dim=384))
+    """Real embedder using local MiniLM service (port 8080).
+
+    Produces 384-dim embeddings compatible with the test fixture graph.
+    """
+    local_embedding_url = os.getenv('EMBEDDING_API_URL', '').replace(
+        'host.docker.internal', 'localhost'
+    ) or 'http://localhost:8080/v1'
+    local_model = os.getenv('EMBEDDING_MODEL', 'all-MiniLM-L6-v2')
+    return OpenAIEmbedder(
+        config=OpenAIEmbedderConfig(
+            embedding_dim=384,
+            base_url=local_embedding_url,
+            api_key='dummy',
+            embedding_model=local_model,
+        )
+    )
 
 
-from unittest.mock import AsyncMock, Mock
-
-from graphiti_core.cross_encoder.client import CrossEncoderClient
-from graphiti_core.graphiti import Graphiti
-from graphiti_core.llm_client import LLMClient
+@pytest.fixture
+def deepseek_llm_client():
+    """Real DeepSeek LLM client for e2e tests."""
+    return OpenAIGenericClient(
+        config=LLMConfig(
+            api_key=os.getenv('OPENAI_API_KEY'),
+            base_url=os.getenv('OPENAI_BASE_URL', 'https://api.deepseek.com/v1'),
+            model=os.getenv('OPENAI_MODEL_NAME', 'deepseek-chat'),
+            small_model=os.getenv('OPENAI_MODEL_NAME', 'deepseek-chat'),
+            temperature=0.0,
+            max_tokens=4096,
+        )
+    )
 
 
 def _mock_llm_client() -> LLMClient:
@@ -226,20 +162,8 @@ def _mock_cross_encoder() -> CrossEncoderClient:
 
 
 @pytest.fixture
-async def graphiti_with_mock_embedder(bfs_driver, mock_embedder):
-    """Graphiti instance wired with mock_embedder + mock LLM/cross-encoder. Use for #14,#15,#18-#22."""
-    g = Graphiti(
-        graph_driver=bfs_driver,
-        llm_client=_mock_llm_client(),
-        embedder=mock_embedder,
-        cross_encoder=_mock_cross_encoder(),
-    )
-    return g
-
-
-@pytest.fixture
 async def graphiti_with_real_embedder(bfs_driver, real_embedder):
-    """Graphiti instance wired with real OpenAIEmbedder. Use for #13,#16,#17,#23."""
+    """Graphiti instance wired with real MiniLM embedder + mock LLM/cross-encoder."""
     g = Graphiti(
         graph_driver=bfs_driver,
         llm_client=_mock_llm_client(),
