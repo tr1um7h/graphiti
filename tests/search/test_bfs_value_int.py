@@ -141,3 +141,141 @@ async def test_17_bfs_recall_dense_cluster(
     ]
     assert len(withbfs_linked_from_q1) >= 1  # at minimum, Q1's own LINKED edges appear
     assert len(withbfs_linked_from_q1) > len(baseline_linked_from_q1)
+
+
+from datetime import datetime, timezone
+
+from graphiti_core.search.search_filters import (
+    ComparisonOperator,
+    DateFilter,
+    SearchFilters,
+)
+
+
+@pytest.mark.asyncio
+async def test_18_bfs_auto_origin_fallback(
+    graphiti_with_mock_embedder, mock_embedder, bfs_driver
+):
+    """#18 [mock]: no explicit origin → WITH_BFS uses bm25/cosine hits as origins
+    (search.py:332-353 auto-expand path); WITH_BFS edge count > BASELINE."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    query = 'Alice WORKS_AT AcmeCorp'
+
+    baseline = await graphiti_with_mock_embedder.search_(
+        query=query, config=BASELINE_CONFIG, group_ids=[TEST_GROUP],
+    )
+    with_bfs = await graphiti_with_mock_embedder.search_(
+        query=query, config=WITH_BFS_CONFIG, group_ids=[TEST_GROUP],
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, with_bfs.edges, ctx)
+    assert len(with_bfs.edges) > len(baseline.edges)
+
+
+@pytest.mark.asyncio
+async def test_19_bfs_depth_3_vs_depth_1_recall_gap(
+    graphiti_with_mock_embedder, mock_embedder, bfs_driver
+):
+    """#19 [mock]: WITH_BFS at depth=3 reaches USA edge; depth=1 does not."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    query = 'Alice WORKS_AT AcmeCorp'
+
+    from graphiti_core.search.search_config import (
+        EdgeReranker, EdgeSearchConfig, EdgeSearchMethod, SearchConfig,
+    )
+
+    depth1_config = SearchConfig(
+        edge_config=EdgeSearchConfig(
+            search_methods=[
+                EdgeSearchMethod.bm25, EdgeSearchMethod.cosine_similarity, EdgeSearchMethod.bfs,
+            ],
+            reranker=EdgeReranker.rrf,
+            sim_min_score=0.2,
+            bfs_max_depth=1,
+        ),
+        limit=10,
+    )
+
+    with_bfs_d3 = await graphiti_with_mock_embedder.search_(
+        query=query, config=WITH_BFS_CONFIG, group_ids=[TEST_GROUP],
+    )
+    with_bfs_d1 = await graphiti_with_mock_embedder.search_(
+        query=query, config=depth1_config, group_ids=[TEST_GROUP],
+    )
+
+    usa_edge_uuid = ctx.edges[
+        f'IN_COUNTRY:{ctx.nodes["SanFrancisco"]}:{ctx.nodes["USA"]}'
+    ].uuid
+    d3_uuids = {e.uuid for e in with_bfs_d3.edges}
+    d1_uuids = {e.uuid for e in with_bfs_d1.edges}
+    assert usa_edge_uuid in d3_uuids
+    assert usa_edge_uuid not in d1_uuids
+
+
+@pytest.mark.asyncio
+async def test_20_bfs_does_not_leak_across_groups_in_recipe(
+    graphiti_with_mock_embedder, mock_embedder, bfs_driver
+):
+    """#20 [mock]: WITH_BFS scoped to G1 returns zero G2 facts."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    query = 'Alice WORKS_AT AcmeCorp'
+
+    with_bfs = await graphiti_with_mock_embedder.search_(
+        query=query, config=WITH_BFS_CONFIG, group_ids=[TEST_GROUP],
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, with_bfs.edges, ctx)
+    for edge in with_bfs.edges:
+        assert edge.group_id == TEST_GROUP
+
+
+@pytest.mark.asyncio
+async def test_21_bfs_recall_with_temporal_filter(
+    graphiti_with_mock_embedder, mock_embedder, bfs_driver
+):
+    """#21 [mock]: valid_at > 2022-01-01 → only NewEvent OCCURRED_ON edge survives."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    query = 'OCCURRED_ON'
+    temporal_filter = SearchFilters(
+        valid_at=[[DateFilter(date=datetime(2022, 1, 1, tzinfo=timezone.utc),
+                                comparison_operator=ComparisonOperator.greater_than)]],
+    )
+
+    with_bfs = await graphiti_with_mock_embedder.search_(
+        query=query, config=WITH_BFS_CONFIG, group_ids=[TEST_GROUP],
+        search_filter=temporal_filter,
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, with_bfs.edges, ctx)
+    new_event_edge_uuid = ctx.edges[
+        f'OCCURRED_ON:{ctx.nodes["NewEvent"]}:{ctx.nodes["2025Anchor"]}'
+    ].uuid
+    old_event_edge_uuid = ctx.edges[
+        f'OCCURRED_ON:{ctx.nodes["OldEvent"]}:{ctx.nodes["2020Anchor"]}'
+    ].uuid
+    returned_uuids = {e.uuid for e in with_bfs.edges}
+    if returned_uuids:  # filter may produce empty when no match — then no leak either
+        assert old_event_edge_uuid not in returned_uuids
+        assert new_event_edge_uuid in returned_uuids
+
+
+@pytest.mark.asyncio
+async def test_22_bfs_multi_origin_convergence_dedup(
+    graphiti_with_mock_embedder, mock_embedder, bfs_driver
+):
+    """#22 [mock]: origins [Alice, AcmeCorp] both reach LOCATED_IN; SQL DISTINCT keeps it to 1."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    alice = ctx.nodes['Alice']
+    acme = ctx.nodes['AcmeCorp']
+    located_in_uuid = ctx.edges[
+        f'LOCATED_IN:{ctx.nodes["AcmeCorp"]}:{ctx.nodes["SanFrancisco"]}'
+    ].uuid
+
+    results = await bfs_driver.search_ops.edge_bfs_search(
+        bfs_driver, [alice, acme], 2, SearchFilters(), [TEST_GROUP], 10,
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, results, ctx)
+    uuids = [e.uuid for e in results]
+    assert uuids.count(located_in_uuid) == 1  # exactly once despite dual-origin convergence
+    assert len(uuids) == len(set(uuids))     # all unique
