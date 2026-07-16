@@ -95,3 +95,45 @@ async def bfs_driver() -> AsyncIterator[PostgresAgeDriver]:
         yield driver
     finally:
         await driver.close()
+
+
+import tests.helpers_test as helpers
+from graphiti_core.embedder.openai import OpenAIEmbedder, OpenAIEmbedderConfig
+
+# Query strings used by mock-embedder tests (semantic-class tests go through real_embedder).
+MOCK_QUERY_EMBEDDINGS = {
+    'LeadBob 的下属': [0.2] * 384,
+    'NodeA1 相关节点': [0.4] * 384,
+    'OCCURRED_ON': [0.6] * 384,
+    'Q1': [0.5] * 384,
+    'Alice WORKS_AT AcmeCorp': [0.7] * 384,
+    'AcmeCorp LOCATED_IN SanFrancisco': [0.8] * 384,
+}
+
+
+@pytest.fixture(autouse=True)
+def extend_mock_embedder_dict():
+    """Locally extend helpers.embeddings for the duration of each test,
+    then restore. Does not modify tests/helpers_test.py."""
+    saved = dict(helpers.embeddings)
+    helpers.embeddings.update(MOCK_QUERY_EMBEDDINGS)
+    try:
+        yield
+    finally:
+        helpers.embeddings.clear()
+        helpers.embeddings.update(saved)
+
+
+@pytest.fixture
+def mock_embedder():
+    """Re-export of helpers_test.mock_embedder (object is request-scoped)."""
+    from tests.helpers_test import mock_embedder as _mock
+    return _mock
+
+
+@pytest.fixture
+def real_embedder():
+    """Real OpenAI embedder; skip cleanly when OPENAI_API_KEY is unset."""
+    if not os.getenv('OPENAI_API_KEY'):
+        pytest.skip('OPENAI_API_KEY not set; skipping real-embedder BFS test')
+    return OpenAIEmbedder(config=OpenAIEmbedderConfig(embedding_dim=384))
