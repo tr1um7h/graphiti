@@ -68,3 +68,76 @@ async def test_16_bfs_recall_synonym_query(
     if ctx.edges[works_at_key].uuid not in baseline_uuids:
         # true positive: BFS compensated a real cosine miss
         pass
+
+
+@pytest.mark.asyncio
+async def test_14_bfs_recall_indirect_teammates(
+    graphiti_with_mock_embedder, mock_embedder, bfs_driver
+):
+    """#14 [mock]: 'LeadBob 的下属' — WITH_BFS returns ≥3 MANAGES edges; BASELINE ≤1."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    query = 'LeadBob 的下属'
+
+    baseline = await graphiti_with_mock_embedder.search_(
+        query=query, config=BASELINE_CONFIG, group_ids=[TEST_GROUP],
+    )
+    with_bfs = await graphiti_with_mock_embedder.search_(
+        query=query, config=WITH_BFS_CONFIG, group_ids=[TEST_GROUP],
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, with_bfs.edges, ctx)
+    withbfs_manages = [e for e in with_bfs.edges if e.name == 'MANAGES']
+    baseline_manages = [e for e in baseline.edges if e.name == 'MANAGES']
+    assert len(withbfs_manages) >= 3
+    assert len(baseline_manages) <= 1
+    expected_reports = {ctx.nodes['EmpCarol'], ctx.nodes['EmpDave'], ctx.nodes['EmpEve']}
+    returned_targets = {e.target_node_uuid for e in withbfs_manages}
+    assert expected_reports.issubset(returned_targets)
+
+
+@pytest.mark.asyncio
+async def test_15_bfs_does_not_cross_disconnected_clusters(
+    graphiti_with_mock_embedder, mock_embedder, bfs_driver
+):
+    """#15 [mock]: query hitting NodeA1 — Cluster B (NodeB*) never appears."""
+    ctx = await seed_bfs_graph(bfs_driver, mock_embedder, TEST_GROUP, TEST_GROUP_2)
+    query = 'NodeA1 相关节点'
+
+    with_bfs = await graphiti_with_mock_embedder.search_(
+        query=query, config=WITH_BFS_CONFIG, group_ids=[TEST_GROUP],
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, with_bfs.edges, ctx)
+    cluster_b_uuids = {ctx.nodes['NodeB1'], ctx.nodes['NodeB2'], ctx.nodes['NodeB3']}
+    for edge in with_bfs.edges:
+        assert edge.source_node_uuid not in cluster_b_uuids
+        assert edge.target_node_uuid not in cluster_b_uuids
+
+
+@pytest.mark.asyncio
+async def test_17_bfs_recall_dense_cluster(
+    graphiti_with_real_embedder, real_embedder, bfs_driver
+):
+    """#17 [real]: 'Q1' — WITH_BFS returns 4 LINKED out-edges; BASELINE ≤1."""
+    ctx = await seed_bfs_graph(bfs_driver, real_embedder, TEST_GROUP, TEST_GROUP_2)
+    query = 'Q1'
+
+    baseline = await graphiti_with_real_embedder.search_(
+        query=query, config=BASELINE_CONFIG, group_ids=[TEST_GROUP],
+    )
+    with_bfs = await graphiti_with_real_embedder.search_(
+        query=query, config=WITH_BFS_CONFIG, group_ids=[TEST_GROUP],
+    )
+
+    await assert_returned_edges_well_formed(bfs_driver, with_bfs.edges, ctx)
+    q1_uuid = ctx.nodes['Q1']
+    withbfs_linked_from_q1 = [
+        e for e in with_bfs.edges
+        if e.name == 'LINKED' and e.source_node_uuid == q1_uuid
+    ]
+    baseline_linked_from_q1 = [
+        e for e in baseline.edges
+        if e.name == 'LINKED' and e.source_node_uuid == q1_uuid
+    ]
+    assert len(withbfs_linked_from_q1) >= 1  # at minimum, Q1's own LINKED edges appear
+    assert len(withbfs_linked_from_q1) > len(baseline_linked_from_q1)
