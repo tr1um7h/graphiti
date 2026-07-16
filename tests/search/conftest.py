@@ -137,3 +137,55 @@ def real_embedder():
     if not os.getenv('OPENAI_API_KEY'):
         pytest.skip('OPENAI_API_KEY not set; skipping real-embedder BFS test')
     return OpenAIEmbedder(config=OpenAIEmbedderConfig(embedding_dim=384))
+
+
+from unittest.mock import AsyncMock, Mock
+
+from graphiti_core.cross_encoder.client import CrossEncoderClient
+from graphiti_core.graphiti import Graphiti
+from graphiti_core.llm_client import LLMClient
+
+
+def _mock_llm_client() -> LLMClient:
+    mock_llm = Mock(spec=LLMClient)
+    mock_llm.config = Mock()
+    mock_llm.model = 'test-model'
+    mock_llm.small_model = 'test-small-model'
+    mock_llm.temperature = 0.0
+    mock_llm.max_tokens = 1000
+    mock_llm.cache_enabled = False
+    mock_llm.cache_dir = None
+    mock_llm.generate_response = AsyncMock(return_value={'answer': '', 'content': ''})
+    mock_llm.set_tracer = Mock()
+    return mock_llm
+
+
+def _mock_cross_encoder() -> CrossEncoderClient:
+    mock_ce = Mock(spec=CrossEncoderClient)
+    mock_ce.config = Mock()
+    mock_ce.rank = AsyncMock(return_value=[])
+    return mock_ce
+
+
+@pytest.fixture
+async def graphiti_with_mock_embedder(bfs_driver, mock_embedder):
+    """Graphiti instance wired with mock_embedder + mock LLM/cross-encoder. Use for #14,#15,#18-#22."""
+    g = Graphiti(
+        graph_driver=bfs_driver,
+        llm_client=_mock_llm_client(),
+        embedder=mock_embedder,
+        cross_encoder=_mock_cross_encoder(),
+    )
+    return g
+
+
+@pytest.fixture
+async def graphiti_with_real_embedder(bfs_driver, real_embedder):
+    """Graphiti instance wired with real OpenAIEmbedder. Use for #13,#16,#17,#23."""
+    g = Graphiti(
+        graph_driver=bfs_driver,
+        llm_client=_mock_llm_client(),
+        embedder=real_embedder,
+        cross_encoder=_mock_cross_encoder(),
+    )
+    return g
