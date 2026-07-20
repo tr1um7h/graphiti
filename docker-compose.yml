@@ -54,6 +54,10 @@ services:
       - DATABASE_PROVIDER=postgres_age
       # 禁用遥测
       - GRAPHITI_TELEMETRY_ENABLED=${GRAPHITI_TELEMETRY_ENABLED:-false}
+      # Chat 搜索参数
+      - CHAT_SIM_MIN_SCORE=${CHAT_SIM_MIN_SCORE:-0.2}
+      - CHAT_SEARCH_LIMIT=${CHAT_SEARCH_LIMIT:-10}
+      - CHAT_BFS_MAX_DEPTH=${CHAT_BFS_MAX_DEPTH:-3}
 
   # Graphiti MCP Server
   mcp-server:
@@ -86,6 +90,12 @@ services:
       - EMBEDDER_PROVIDER=${EMBEDDER_PROVIDER:-openai}
       - EMBEDDING_API_URL=${EMBEDDING_API_URL:-http://host.docker.internal:8080/v1}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      # 禁用代理（避免 SOCKS5 兼容性问题）
+      - NO_PROXY=*
+      - no_proxy=*
+      - HTTP_PROXY=
+      - HTTPS_PROXY=
+      - ALL_PROXY=
     volumes:
       - ./mcp_server/config/config-docker-postgres-age.yaml:/app/mcp/config/config.yaml:ro
       - mcp_logs:/var/log/graphiti
