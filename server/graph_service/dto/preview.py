@@ -44,6 +44,7 @@ class EdgePreview(BaseModel):
     target_node_name: str = ''
     valid_at: datetime | None = None
     invalid_at: datetime | None = None
+    expired_at: datetime | None = None
 
 
 class PreviewMemoryResponse(BaseModel):
@@ -79,6 +80,7 @@ class EdgeConfirm(BaseModel):
     target_node_uuid: str
     valid_at: datetime | None = None
     invalid_at: datetime | None = None
+    expired_at: datetime | None = None
 
 
 class CommitMemoryRequest(BaseModel):

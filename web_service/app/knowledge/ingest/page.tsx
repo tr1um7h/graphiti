@@ -58,6 +58,7 @@ interface EdgePreview {
   target_node_name: string;
   valid_at: string | null;
   invalid_at: string | null;
+  expired_at: string | null;
 }
 
 interface PreviewMemoryResponse {
@@ -623,6 +624,7 @@ export default function IngestPage() {
       target_node_name: '',
       valid_at: null,
       invalid_at: null,
+      expired_at: null,
     };
     setEditingEdge({ edge: newEdge, isNew: true });
   }, []);
@@ -648,6 +650,7 @@ export default function IngestPage() {
           target_node_name: targetNode?.name || '',
           valid_at: null,
           invalid_at: null,
+          expired_at: null,
         };
         setPreview((prev) =>
           prev ? { ...prev, edges: [...prev.edges, newEdge] } : prev,

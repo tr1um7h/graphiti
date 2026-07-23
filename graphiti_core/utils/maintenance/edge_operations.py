@@ -550,6 +550,7 @@ def resolve_edge_contradictions(
         edge_valid_at_utc = ensure_utc(edge.valid_at)
         resolved_edge_invalid_at_utc = ensure_utc(resolved_edge.invalid_at)
 
+        # Check if time ranges don't overlap
         if (
             edge_invalid_at_utc is not None
             and resolved_edge_valid_at_utc is not None
@@ -559,6 +560,8 @@ def resolve_edge_contradictions(
             and resolved_edge_invalid_at_utc is not None
             and resolved_edge_invalid_at_utc <= edge_valid_at_utc
         ):
+            # Time ranges don't overlap - edge was already invalid before new edge became valid
+            # Don't update expired_at for already-invalid edges
             continue
         # New edge invalidates edge
         elif (
@@ -818,9 +821,6 @@ async def resolve_extracted_edge(
     )
 
     now = utc_now()
-
-    if resolved_edge.invalid_at and not resolved_edge.expired_at:
-        resolved_edge.expired_at = now
 
     # Determine if the new_edge needs to be expired
     if resolved_edge.expired_at is None:

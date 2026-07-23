@@ -55,8 +55,7 @@ class PostgresAgeEntityEdgeOperations(EntityEdgeOperations):
                     valid_at = EXCLUDED.valid_at,
                     invalid_at = EXCLUDED.invalid_at,
                     reference_time = EXCLUDED.reference_time,
-                    attributes = EXCLUDED.attributes,
-                    created_at = EXCLUDED.created_at
+                    attributes = EXCLUDED.attributes
                 """,
                 row,
             )

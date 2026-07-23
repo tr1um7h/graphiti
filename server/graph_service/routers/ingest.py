@@ -341,6 +341,7 @@ def _serialize_preview_result(result, uuid_map: dict[str, str]) -> dict:
             'target_node_name': node_name_map.get(edge.target_node_uuid, ''),
             'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
             'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
+            'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
         }
 
     node_name_map = {n.uuid: n.name for n in result.nodes}
@@ -491,6 +492,7 @@ async def commit_memory(
             target_node_uuid=ec.target_node_uuid,
             valid_at=ec.valid_at,
             invalid_at=ec.invalid_at,
+            expired_at=ec.expired_at,
             group_id=request.group_id,
             created_at=now,
         )
