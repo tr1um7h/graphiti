@@ -6,13 +6,16 @@ from datetime import datetime
 from typing import Any, cast
 
 from graphiti_core.driver.driver import GraphDriver, GraphDriverSession, GraphProvider
+from graphiti_core.driver.graph_operations.graph_operations import GraphOperationsInterface
 from graphiti_core.driver.operations.entity_edge_ops import EntityEdgeOperations
 from graphiti_core.driver.operations.entity_node_ops import EntityNodeOperations
 from graphiti_core.driver.operations.episode_node_ops import EpisodeNodeOperations
 from graphiti_core.driver.operations.episodic_edge_ops import EpisodicEdgeOperations
 from graphiti_core.driver.operations.search_ops import SearchOperations
 from graphiti_core.driver.query_executor import QueryExecutor, Transaction
+from graphiti_core.driver.search_interface.search_interface import SearchInterface
 from graphiti_core.edges import EntityEdge, EpisodicEdge
+from graphiti_core.embedder.client import EmbedderClient
 from graphiti_core.errors import EdgeNotFoundError, NodeNotFoundError
 from graphiti_core.nodes import CommunityNode, EntityNode, EpisodeType, EpisodicNode
 from graphiti_core.search.search_filters import SearchFilters
@@ -98,6 +101,233 @@ def _check_single_date_filter(value: datetime | None, date_filter: Any) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# SearchInterface Adapter
+# ---------------------------------------------------------------------------
+
+
+class PyDictSearchInterfaceAdapter(SearchInterface):
+    """Adapts PyDictSearchOperations to SearchInterface.
+
+    Key differences:
+    - SearchInterface.rerankers return tuple[list[str], list[float]]
+    - SearchOperations.rerankers return list[EntityNode]
+    - SearchInterface.episode_mentions_reranker takes list[list[str]]
+    - SearchOperations.episode_mentions_reranker takes list[str]
+    """
+
+    def __init__(self, search_ops: 'PyDictSearchOperations'):
+        self._ops = search_ops
+
+    async def edge_fulltext_search(
+        self,
+        driver: Any,
+        query: str,
+        search_filter: Any,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        return await self._ops.edge_fulltext_search(driver, query, search_filter, group_ids, limit)
+
+    async def edge_similarity_search(
+        self,
+        driver: Any,
+        search_vector: list[float],
+        source_node_uuid: str | None,
+        target_node_uuid: str | None,
+        search_filter: Any,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+        min_score: float = 0.7,
+    ) -> list[Any]:
+        return await self._ops.edge_similarity_search(
+            driver, search_vector, source_node_uuid, target_node_uuid, search_filter, group_ids, limit, min_score
+        )
+
+    async def edge_bfs_search(
+        self,
+        driver: Any,
+        bfs_origin_node_uuids: list[str] | None,
+        bfs_max_depth: int,
+        search_filter: Any,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        if bfs_origin_node_uuids is None:
+            return []
+        return await self._ops.edge_bfs_search(
+            driver, bfs_origin_node_uuids, bfs_max_depth, search_filter, group_ids, limit
+        )
+
+    async def node_fulltext_search(
+        self,
+        driver: Any,
+        query: str,
+        search_filter: Any,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        return await self._ops.node_fulltext_search(driver, query, search_filter, group_ids, limit)
+
+    async def node_similarity_search(
+        self,
+        driver: Any,
+        search_vector: list[float],
+        search_filter: Any,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+        min_score: float = 0.7,
+    ) -> list[Any]:
+        return await self._ops.node_similarity_search(driver, search_vector, search_filter, group_ids, limit, min_score)
+
+    async def node_bfs_search(
+        self,
+        driver: Any,
+        bfs_origin_node_uuids: list[str] | None,
+        search_filter: Any,
+        bfs_max_depth: int,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        if bfs_origin_node_uuids is None:
+            return []
+        return await self._ops.node_bfs_search(driver, bfs_origin_node_uuids, search_filter, bfs_max_depth, group_ids, limit)
+
+    async def episode_fulltext_search(
+        self,
+        driver: Any,
+        query: str,
+        search_filter: Any,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        return await self._ops.episode_fulltext_search(driver, query, search_filter, group_ids, limit)
+
+    async def community_fulltext_search(
+        self,
+        driver: Any,
+        query: str,
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[Any]:
+        return await self._ops.community_fulltext_search(driver, query, group_ids, limit)
+
+    async def community_similarity_search(
+        self,
+        driver: Any,
+        search_vector: list[float],
+        group_ids: list[str] | None = None,
+        limit: int = 100,
+        min_score: float = 0.6,
+    ) -> list[Any]:
+        return await self._ops.community_similarity_search(driver, search_vector, group_ids, limit, min_score)
+
+    async def get_embeddings_for_communities(
+        self,
+        driver: Any,
+        communities: list[Any],
+    ) -> dict[str, list[float]]:
+        result: dict[str, list[float]] = {}
+        for c in communities:
+            if c.name_embedding is not None:
+                result[c.uuid] = c.name_embedding
+        return result
+
+    async def node_distance_reranker(
+        self,
+        driver: Any,
+        node_uuids: list[str],
+        center_node_uuid: str,
+        min_score: float = 0,
+    ) -> tuple[list[str], list[float]]:
+        nodes = await self._ops.node_distance_reranker(driver, node_uuids, center_node_uuid, min_score)
+        return [n.uuid for n in nodes], [1.0] * len(nodes)
+
+    async def episode_mentions_reranker(
+        self,
+        driver: Any,
+        node_uuids: list[list[str]],
+        min_score: float = 0,
+    ) -> tuple[list[str], list[float]]:
+        # Flatten list[list[str]] to list[str] for SearchOperations
+        flat_uuids: list[str] = []
+        seen: set[str] = set()
+        for uuid_list in node_uuids:
+            for uuid in uuid_list:
+                if uuid not in seen:
+                    flat_uuids.append(uuid)
+                    seen.add(uuid)
+        nodes = await self._ops.episode_mentions_reranker(driver, flat_uuids, min_score)
+        # Count mentions from store for each node
+        store = _get_store(driver)
+        mention_counts: list[float] = []
+        for n in nodes:
+            count = len(store.get('entity_episodic_edges', {}).get(n.uuid, set()))
+            mention_counts.append(float(count))
+        return [n.uuid for n in nodes], mention_counts
+
+    def build_node_search_filters(self, search_filters: Any) -> Any:
+        return self._ops.build_node_search_filters(search_filters)
+
+    def build_edge_search_filters(self, search_filters: Any) -> Any:
+        return self._ops.build_edge_search_filters(search_filters)
+
+
+# ---------------------------------------------------------------------------
+# GraphOperationsInterface Adapter (minimal: only embedding loading for search)
+# ---------------------------------------------------------------------------
+
+
+class PyDictGraphOperationsAdapter(GraphOperationsInterface):
+    """Minimal GraphOperationsInterface for PyDict.
+
+    Only implements embedding loading methods needed by search rerankers
+    (MMR, similarity). All other methods raise NotImplementedError, which
+    callers handle gracefully via try/except.
+    """
+
+    async def edge_load_embeddings_bulk(
+        self,
+        driver: Any,
+        edges: list[Any],
+        batch_size: int = 100,  # noqa: ARG002
+    ) -> dict[str, list[float]]:
+        result: dict[str, list[float]] = {}
+        for edge in edges:
+            if edge.fact_embedding is not None:
+                result[edge.uuid] = edge.fact_embedding
+        return result
+
+    async def node_load_embeddings_bulk(
+        self,
+        driver: Any,
+        nodes: list[Any],
+        batch_size: int = 100,  # noqa: ARG002
+    ) -> dict[str, list[float]]:
+        result: dict[str, list[float]] = {}
+        for node in nodes:
+            if node.name_embedding is not None:
+                result[node.uuid] = node.name_embedding
+        return result
+
+    async def get_mentioned_nodes(
+        self,
+        driver: Any,
+        episodes: list[Any],
+    ) -> list[Any]:
+        store = _get_store(driver)
+        nodes: list[Any] = []
+        seen: set[str] = set()
+        for episode in episodes:
+            for entity_uuid in store.get('episode_mentions', {}).get(episode.uuid, []):
+                if entity_uuid not in seen:
+                    node = store['entities'].get(entity_uuid)
+                    if node is not None:
+                        nodes.append(node)
+                        seen.add(entity_uuid)
+        return nodes
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -148,6 +378,11 @@ class PydictDriver(GraphDriver):
         self._entity_edge_ops = PyDictEntityEdgeOperations()
         self._episodic_edge_ops = PyDictEpisodicEdgeOperations()
         self._search_ops = PyDictSearchOperations()
+
+        # Set search_interface so BFS and rerankers work
+        self.search_interface = PyDictSearchInterfaceAdapter(self._search_ops)
+        # Set graph_operations_interface so embedding loading works (MMR reranker)
+        self.graph_operations_interface = PyDictGraphOperationsAdapter()
 
     # --- Operations properties ------------------------------------------------
 
@@ -200,12 +435,17 @@ class PydictDriver(GraphDriver):
         *,
         target_type: str = 'Entity',
         group_id: str = 'default',
+        embedder: EmbedderClient | None = None,
     ) -> None:
         """Store a simple (subject, relation, object) triplet.
 
         Example::
 
             await driver.add_memory('alice', 'works_at', 'paic', target_type='company')
+
+        If ``embedder`` is provided, embeddings are generated for:
+        - EntityNode.name_embedding (for similarity search)
+        - EntityEdge.fact_embedding (for similarity search and MMR reranking)
         """
         logger.info(
             '[PyDict] add_memory: name=%s, relation=%s, target=%s (type=%s, group=%s)',
@@ -217,12 +457,23 @@ class PydictDriver(GraphDriver):
         )
 
         now = utc_now()
+        fact_text = f'{name} {relation} {target_name}'
+
+        # --- generate embeddings if embedder provided ---
+        name_embedding: list[float] | None = None
+        fact_embedding: list[float] | None = None
+        if embedder is not None:
+            # Embed both name and fact for similarity search
+            embeddings = await embedder.create_batch([name, fact_text])
+            name_embedding = embeddings[0]
+            fact_embedding = embeddings[1]
 
         # --- source entity node ---
         source = EntityNode(
             name=name,
             group_id=group_id,
             created_at=now,
+            name_embedding=name_embedding,
         )
 
         # --- target entity node ---
@@ -232,25 +483,27 @@ class PydictDriver(GraphDriver):
             labels=target_labels,
             group_id=group_id,
             created_at=now,
+            name_embedding=name_embedding,  # Use same embedding for target name
         )
 
         # --- relationship edge ---
         edge = EntityEdge(
             name=relation,
-            fact=f'{name} {relation} {target_name}',
+            fact=fact_text,
             source_node_uuid=source.uuid,
             target_node_uuid=target.uuid,
             group_id=group_id,
             created_at=now,
+            fact_embedding=fact_embedding,
         )
 
         # --- episode recording the fact ---
         episode = EpisodicNode(
-            name=f'{name} {relation} {target_name}',
+            name=fact_text,
             group_id=group_id,
             source=EpisodeType.text,
             source_description='add_memory',
-            content=f'{name} {relation} {target_name}',
+            content=fact_text,
             valid_at=now,
             created_at=now,
             entity_edges=[edge.uuid],

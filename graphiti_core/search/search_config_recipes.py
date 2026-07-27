@@ -30,6 +30,22 @@ from graphiti_core.search.search_config import (
     SearchConfig,
 )
 
+COMBINED_HYBRID_SEARCH_JCHEN = SearchConfig(
+    node_config=NodeSearchConfig(
+        search_methods=[
+            NodeSearchMethod.bm25,
+        ],
+        reranker=NodeReranker.rrf,
+    ),
+    edge_config=EdgeSearchConfig(
+        search_methods=[
+            EdgeSearchMethod.bm25,
+            EdgeSearchMethod.bfs,
+        ],
+        reranker=EdgeReranker.mmr,
+    )
+)
+
 # Performs a hybrid search with rrf reranking over edges, nodes, and communities
 COMBINED_HYBRID_SEARCH_RRF = SearchConfig(
     edge_config=EdgeSearchConfig(

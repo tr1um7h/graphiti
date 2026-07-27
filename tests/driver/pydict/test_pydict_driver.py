@@ -9,6 +9,17 @@ from graphiti_core.edges import EntityEdge
 from graphiti_core.nodes import EntityNode, EpisodicNode
 
 
+class MockEmbedder:
+    """Mock embedder for testing."""
+
+    async def create_batch(self, texts: list[str]) -> list[list[float]]:
+        # Return deterministic embeddings based on text hash
+        return [[float(hash(t) % 1000) / 1000.0] * 384 for t in texts]
+
+    async def create(self, text: str) -> list[float]:
+        return [float(hash(text) % 1000) / 1000.0] * 384
+
+
 @pytest.fixture
 def driver() -> PydictDriver:
     """Create a fresh PydictDriver for each test."""
@@ -222,3 +233,90 @@ class TestSearchOperations:
             driver, 'works_at', SearchFilters(), limit=10
         )
         assert any('works_at' in ep.content for ep in episodes)
+
+
+class TestSearchInterface:
+    """Tests for PyDictSearchInterfaceAdapter (BFS, rerankers via search_interface)."""
+
+    @pytest.mark.asyncio
+    async def test_search_interface_is_set(self, driver: PydictDriver):
+        """PydictDriver should have search_interface set."""
+        assert driver.search_interface is not None
+
+    @pytest.mark.asyncio
+    async def test_edge_bfs_search_via_interface(self, driver: PydictDriver):
+        """edge_bfs_search should work via search_interface."""
+        await driver.add_memory('alice', 'works_at', 'paic')
+        await driver.add_memory('paic', 'located_in', 'shenzhen')
+
+        from graphiti_core.search.search_filters import SearchFilters
+
+        # Get alice's uuid
+        nodes = await driver.entity_node_ops.get_by_group_ids(driver, ['default'])
+        alice_uuid = next(n.uuid for n in nodes if n.name == 'alice')
+
+        # BFS from alice
+        edges = await driver.search_interface.edge_bfs_search(
+            driver, [alice_uuid], 2, SearchFilters(), ['default'], limit=10
+        )
+        # Should find 'works_at' edge
+        assert len(edges) >= 1
+
+    @pytest.mark.asyncio
+    async def test_node_distance_reranker_via_interface(self, driver: PydictDriver):
+        """node_distance_reranker should work via search_interface."""
+        await driver.add_memory('alice', 'works_at', 'paic')
+        await driver.add_memory('alice', 'lives_in', 'shenzhen')
+
+        from graphiti_core.search.search_filters import SearchFilters
+
+        nodes = await driver.entity_node_ops.get_by_group_ids(driver, ['default'])
+        alice_uuid = next(n.uuid for n in nodes if n.name == 'alice')
+        other_uuids = [n.uuid for n in nodes if n.name != 'alice']
+
+        uuids, scores = await driver.search_interface.node_distance_reranker(
+            driver, other_uuids, alice_uuid
+        )
+        assert len(uuids) == len(scores)
+
+
+class TestAddMemoryWithEmbedder:
+    """Tests for add_memory with embedder parameter."""
+
+    @pytest.mark.asyncio
+    async def test_add_memory_with_embedder_generates_embeddings(self, driver: PydictDriver):
+        """add_memory with embedder should generate embeddings."""
+        embedder = MockEmbedder()
+        await driver.add_memory('alice', 'works_at', 'paic', embedder=embedder)
+
+        nodes = await driver.entity_node_ops.get_by_group_ids(driver, ['default'])
+        alice = next(n for n in nodes if n.name == 'alice')
+        assert alice.name_embedding is not None
+        assert len(alice.name_embedding) == 384
+
+    @pytest.mark.asyncio
+    async def test_add_memory_with_embedder_sets_fact_embedding(self, driver: PydictDriver):
+        """add_memory with embedder should set fact_embedding on edge."""
+        embedder = MockEmbedder()
+        await driver.add_memory('alice', 'works_at', 'paic', embedder=embedder)
+
+        edges = await driver.entity_edge_ops.get_by_group_ids(driver, ['default'])
+        assert len(edges) == 1
+        assert edges[0].fact_embedding is not None
+        assert len(edges[0].fact_embedding) == 384
+
+    @pytest.mark.asyncio
+    async def test_similarity_search_works_with_embeddings(self, driver: PydictDriver):
+        """similarity_search should work with generated embeddings."""
+        embedder = MockEmbedder()
+        await driver.add_memory('alice', 'works_at', 'paic', embedder=embedder)
+
+        from graphiti_core.search.search_filters import SearchFilters
+
+        # Search with a vector similar to alice's embedding
+        query_vector = [0.5] * 384
+        nodes = await driver.search_ops.node_similarity_search(
+            driver, query_vector, SearchFilters(), limit=10, min_score=0.0
+        )
+        # Should find alice or paic (both have embeddings)
+        assert len(nodes) >= 1

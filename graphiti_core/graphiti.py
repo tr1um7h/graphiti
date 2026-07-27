@@ -64,6 +64,7 @@ from graphiti_core.search.search import SearchConfig, search
 from graphiti_core.search.search_config import DEFAULT_SEARCH_LIMIT, SearchResults
 from graphiti_core.search.search_config_recipes import (
     COMBINED_HYBRID_SEARCH_CROSS_ENCODER,
+    COMBINED_HYBRID_SEARCH_JCHEN,
     EDGE_HYBRID_SEARCH_NODE_DISTANCE,
     EDGE_HYBRID_SEARCH_RRF,
 )
@@ -1875,7 +1876,7 @@ class Graphiti:
     async def search_(
         self,
         query: str,
-        config: SearchConfig = COMBINED_HYBRID_SEARCH_CROSS_ENCODER,
+        config: SearchConfig = COMBINED_HYBRID_SEARCH_JCHEN,
         group_ids: list[str] | None = None,
         center_node_uuid: str | None = None,
         bfs_origin_node_uuids: list[str] | None = None,
