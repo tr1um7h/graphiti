@@ -62,6 +62,7 @@ class GraphProvider(Enum):
     KUZU = 'kuzu'
     NEPTUNE = 'neptune'
     POSTGRES_AGE = 'postgres_age'
+    PYDICT = 'pydict'
 
 
 class GraphDriverSession(ABC):
