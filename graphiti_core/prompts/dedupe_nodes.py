@@ -32,6 +32,15 @@ class NodeDuplicate(BaseModel):
         ...,
         description='candidate_id of the matching EXISTING ENTITY, or -1 if no duplicate exists.',
     )
+    # OWL ontology
+    type_validation: str = Field(
+        default='valid',
+        description='OWL ontology validation result: "valid", "type_mismatch", or "unknown_type"',
+    )
+    matched_ontology_type: str | None = Field(
+        default=None,
+        description='The matched ontology type from the predefined list, if any',
+    )
 
 
 class NodeResolutions(BaseModel):
@@ -115,10 +124,13 @@ Result: duplicate_candidate_id = 0 (synonym — "car" and "vehicle" refer to the
 
 
 def nodes(context: dict[str, Any]) -> list[Message]:
+    # Get allowed entity types from context
+    allowed_types = context.get('allowed_entity_types', ['Entity'])
+
     return [
         Message(
             role='system',
-            content='You are an entity deduplication assistant. '
+            content='You are an entity deduplication assistant with OWL ontology validation. '
             'NEVER fabricate entity names or mark distinct entities as duplicates.',
         ),
         Message(
@@ -140,6 +152,37 @@ def nodes(context: dict[str, Any]) -> list[Message]:
 {to_prompt_json(context['existing_nodes'])}
 </EXISTING ENTITIES>
 
+<ONTOLOGY CONSTRAINTS>
+Allowed Entity Types: {allowed_types}
+
+Stage 5 - OWL Ontology Validation:
+Before resolving duplicates, validate each extracted entity against the ontology:
+
+1. Type Compliance Check:
+   - Check if the entity's `entity_type` overlaps with Allowed Entity Types
+   - If type is NOT in the allowed list → type_validation: "unknown_type"
+   - If entity type contradicts existing entity of same name → type_validation: "type_mismatch"
+   - If type is valid → type_validation: "valid"
+
+2. Duplicate Validation Rules:
+   - ONLY consider duplicates if types are compatible
+   - A "Person" cannot be duplicate of an "Organization" even with same name
+   - A generic "Entity" CAN be duplicate with a more specific type (Person, Location, etc.)
+
+3. Response Requirements:
+   For each entity, provide:
+   - id: entity ID
+   - name: best full name
+   - duplicate_candidate_id: matching candidate or -1
+   - type_validation: "valid" | "type_mismatch" | "unknown_type"
+   - matched_ontology_type: the matched type from allowed list, or null if unknown_type
+
+Examples:
+- Entity "John" (type: ["Person"]) vs existing "John" (type: ["Organization"]) → type_mismatch
+- Entity "Apple" (type: ["Entity"]) vs existing "Apple Inc" (type: ["Organization"]) → valid duplicate
+- Entity "Mars" (type: ["Deity"]) when Allowed=[Entity, Person, Location] → unknown_type
+</ONTOLOGY CONSTRAINTS>
+
 Each of the above ENTITIES was extracted from the CURRENT MESSAGE.
 For each entity, determine if it is a duplicate of any EXISTING ENTITY.
 Entities should only be considered duplicates if they refer to the *same real-world object or concept*.
@@ -156,23 +199,28 @@ For every entity, provide:
 - `id`: integer id from ENTITIES
 - `name`: the best full name for the entity (preserve the original name unless a duplicate has a more complete name)
 - `duplicate_candidate_id`: the `candidate_id` of the EXISTING ENTITY that is the best duplicate match, or -1 if there is no duplicate
+- `type_validation`: "valid", "type_mismatch", or "unknown_type"
+- `matched_ontology_type`: the matched type from allowed list, or null
 
 <EXAMPLE>
 ENTITY: "Sam" (Person)
 EXISTING ENTITIES: [{{"candidate_id": 0, "name": "Sam", "entity_types": ["Person"], "summary": "Sam enjoys hiking and photography"}}]
-Result: duplicate_candidate_id = 0 (same person referenced in conversation)
+Result: duplicate_candidate_id = 0, type_validation = "valid", matched_ontology_type = "Person"
 
 ENTITY: "NYC"
 EXISTING ENTITIES: [{{"candidate_id": 0, "name": "New York City", "entity_types": ["Location"]}}, {{"candidate_id": 1, "name": "New York Knicks", "entity_types": ["Organization"]}}]
-Result: duplicate_candidate_id = 0 (same location, abbreviated name)
+Result: duplicate_candidate_id = 0, type_validation = "valid", matched_ontology_type = "Location"
 
 ENTITY: "Java" (programming language)
 EXISTING ENTITIES: [{{"candidate_id": 0, "name": "Java", "entity_types": ["Location"], "summary": "An island in Indonesia"}}]
-Result: duplicate_candidate_id = -1 (same name but distinct real-world things)
+Result: duplicate_candidate_id = -1, type_validation = "valid", matched_ontology_type = "Entity"
 
 ENTITY: "Marco's car"
 EXISTING ENTITIES: [{{"candidate_id": 0, "name": "Marco's vehicle", "entity_types": ["Entity"], "summary": "Marco drives a red sedan."}}]
-Result: duplicate_candidate_id = 0 (synonym — "car" and "vehicle" refer to the same thing, same possessor)
+Result: duplicate_candidate_id = 0, type_validation = "valid", matched_ontology_type = "Entity"
+
+ENTITY: "Zeus" (type: ["Deity"]) when Allowed=[Entity, Person, Location]
+Result: duplicate_candidate_id = -1, type_validation = "unknown_type", matched_ontology_type = null
 </EXAMPLE>
 """,
         ),

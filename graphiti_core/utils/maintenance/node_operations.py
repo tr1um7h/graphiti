@@ -492,6 +492,30 @@ def _commit_resolution(
     state.duplicate_pairs.extend(duplicate_pairs)
 
 
+def _is_type_compatible(extracted_labels: list[str], candidate_labels: list[str]) -> bool:
+    """Check if extracted node can be duplicate of candidate based on entity types.
+
+    Rules:
+    - Generic 'Entity' can match any specific type (Person, Organization, etc.)
+    - Specific types must overlap to be compatible
+    - No types (both generic Entity) → compatible
+    """
+    extracted_types = set(extracted_labels) - {'Entity'}
+    candidate_types = set(candidate_labels) - {'Entity'}
+
+    # Both generic Entity → compatible
+    if not extracted_types and not candidate_types:
+        return True
+    # Extracted generic, candidate specific → compatible
+    if not extracted_types:
+        return True
+    # Candidate generic, extracted specific → compatible
+    if not candidate_types:
+        return True
+    # Overlapping types → compatible
+    return bool(extracted_types & candidate_types)
+
+
 async def _resolve_with_llm(
     llm_client: LLMClient,
     extracted_nodes: list[EntityNode],
@@ -544,21 +568,43 @@ async def _resolve_with_llm(
                 [ctx['id'] for ctx in extracted_nodes_context[-sample_size:]],
             )
 
-    existing_nodes_context = [
-        {
-            **candidate.attributes,
-            'candidate_id': i,
-            'name': candidate.name,
-            'entity_types': candidate.labels,
-            'summary': candidate.summary[:120] if candidate.summary else '',
-        }
-        for i, candidate in enumerate(indexes.existing_nodes)
-    ]
-
-    # Build candidate_id -> node mapping for resolving duplicates by ID
-    candidates_by_id: dict[int, EntityNode] = {
-        i: node for i, node in enumerate(indexes.existing_nodes)
+    # Build candidate context with type compatibility filtering
+    # Group extracted nodes by their type signature for efficient filtering
+    extracted_type_signatures: dict[int, frozenset[str]] = {
+        i: frozenset(node.labels) - {'Entity'} for i, node in enumerate(llm_extracted_nodes)
     }
+
+    existing_nodes_context = []
+    candidates_by_id: dict[int, EntityNode] = {}
+
+    for i, candidate in enumerate(indexes.existing_nodes):
+        # Check if this candidate is type-compatible with ANY extracted node
+        is_compatible_with_any = False
+        for _, extracted_types_set in extracted_type_signatures.items():
+            extracted_labels = list(extracted_types_set | {'Entity'})
+            # 过滤掉类型不兼容的候选节点
+            if _is_type_compatible(extracted_labels, candidate.labels):
+                is_compatible_with_any = True
+                break
+
+        if not is_compatible_with_any:
+            logger.debug(
+                'Filtered out type-incompatible candidate: %s (%s) for extracted nodes',
+                candidate.name,
+                candidate.labels,
+            )
+            continue
+
+        candidates_by_id[i] = candidate
+        existing_nodes_context.append(
+            {
+                **candidate.attributes,
+                'candidate_id': i,
+                'name': candidate.name,
+                'entity_types': candidate.labels,
+                'summary': candidate.summary[:120] if candidate.summary else '',
+            }
+        )
 
     context = {
         'extracted_nodes': extracted_nodes_context,
@@ -575,9 +621,12 @@ async def _resolve_with_llm(
             if previous_episodes is not None
             else []
         ),
+        # Allowed entity types for ontology validation
+        'allowed_entity_types': list(entity_types_dict.keys()) if entity_types_dict else ['Entity'],
     }
 
     llm_response = await llm_client.generate_response(
+        # dedupe_nodes.nodes call prompt for ontology validation
         prompt_library.dedupe_nodes.nodes(context),
         response_model=NodeResolutions,
         prompt_name='dedupe_nodes.nodes',
@@ -613,6 +662,9 @@ async def _resolve_with_llm(
     for resolution in node_resolutions:
         relative_id: int = resolution.id
         duplicate_candidate_id: int = resolution.duplicate_candidate_id
+        # Handle OWL ontology validation results
+        type_validation: str = resolution.type_validation
+        matched_ontology_type: str | None = resolution.matched_ontology_type
 
         if relative_id not in valid_relative_range:
             logger.warning(
@@ -631,13 +683,35 @@ async def _resolve_with_llm(
         original_index = state.unresolved_indices[relative_id]
         extracted_node = extracted_nodes[original_index]
 
+        # 根据 OWL type_validation 处理结果
+        if type_validation == 'unknown_type':
+            logger.warning(
+                'Entity "%s" has unknown type not in ontology: %s. '
+                'Proceeding as new entity.',
+                extracted_node.name,
+                extracted_node.labels,
+            )
+            # Continue processing as new entity (duplicate_candidate_id ignored)
+
         resolved_node: EntityNode
         if duplicate_candidate_id < 0:
+            resolved_node = extracted_node
+        elif type_validation == 'type_mismatch':
+            # Type mismatch: force no merge, keep as new entity
+            logger.info(
+                'Entity "%s" has type mismatch with candidate. Keeping as new entity.',
+                extracted_node.name,
+            )
             resolved_node = extracted_node
         elif duplicate_candidate_id in candidates_by_id:
             resolved_node = _promote_resolved_node(
                 extracted_node, candidates_by_id[duplicate_candidate_id]
             )
+            # Update labels if matched_ontology_type is more specific
+            if matched_ontology_type and matched_ontology_type != 'Entity' and matched_ontology_type not in resolved_node.labels:
+                resolved_node.labels = list(
+                    set(resolved_node.labels) | {matched_ontology_type}
+                )
         else:
             logger.warning(
                 'Invalid duplicate_candidate_id %d for extracted node %s; treating as no duplicate.',
