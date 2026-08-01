@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from graph_service.config import get_settings
+from graph_service.middleware import TracingMiddleware
 from graph_service.routers import chat, entities, graph, ingest, retrieve, schemas
 from graph_service.zep_graphiti import initialize_graphiti
 
@@ -25,6 +26,9 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+# Tracing middleware must be added before routers so it wraps all requests.
+app.add_middleware(TracingMiddleware)
 
 
 # Register routers

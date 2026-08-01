@@ -19,20 +19,20 @@ router = APIRouter()
 async def get_entity_detail(entity_id: str, graphiti: ZepGraphitiDep):
     """
     Get detailed information about a specific entity.
-    
+
     Returns entity name, labels, summary, attributes, and metadata.
     """
     try:
         from graphiti_core.nodes import EntityNode
-        
+
         # Get entity node by UUID
         entity = await EntityNode.get_by_uuid(graphiti.driver, entity_id)
-        
+
         # Parse labels
         labels = entity.labels or []
         if isinstance(labels, str):
             labels = [labels] if labels else []
-        
+
         return EntityDetailResponse(
             id=entity.uuid,
             name=entity.name,
@@ -40,7 +40,7 @@ async def get_entity_detail(entity_id: str, graphiti: ZepGraphitiDep):
             summary=entity.summary or '',
             created_at=entity.created_at,
             group_id=entity.group_id,
-            attributes=entity.attributes or {}
+            attributes=entity.attributes or {},
         )
     except Exception as e:
         raise HTTPException(status_code=404, detail=f'Entity not found: {str(e)}')
@@ -50,28 +50,28 @@ async def get_entity_detail(entity_id: str, graphiti: ZepGraphitiDep):
 async def get_entity_neighbors(entity_id: str, graphiti: ZepGraphitiDep, depth: int = 1):
     """
     Get neighboring entities and connecting edges.
-    
+
     Returns the center entity, its neighbors, and the edges connecting them.
     Supports multi-hop traversal via depth parameter.
     """
     try:
         from graphiti_core.nodes import EntityNode
-        
+
         # Get center entity
         center_entity = await EntityNode.get_by_uuid(graphiti.driver, entity_id)
-        
+
         center_labels = center_entity.labels or []
         if isinstance(center_labels, str):
             center_labels = [center_labels] if center_labels else []
-        
+
         center_node = GraphNode(
             id=center_entity.uuid,
             name=center_entity.name,
             labels=center_labels,
             summary=center_entity.summary or '',
-            attributes=center_entity.attributes or {}
+            attributes=center_entity.attributes or {},
         )
-        
+
         # Query neighbors using SQL (PostgreSQL AGE stores data in relational tables)
         # entity_edges and entity_nodes are the relational projection tables
         if depth == 1:
@@ -135,30 +135,34 @@ async def get_entity_neighbors(entity_id: str, graphiti: ZepGraphitiDep, depth: 
                 """,
                 params=(entity_id, depth, entity_id),
             )
-        
+
         # Process results — execute_query returns (records, _, _) tuple
         neighbors_records, _, _ = neighbors_result
         nodes = {}
         edges = []
-        
+
         for record in neighbors_records or []:
-            data = record if isinstance(record, dict) else (record[0] if isinstance(record, (tuple, list)) else record)
-            
+            data = (
+                record
+                if isinstance(record, dict)
+                else (record[0] if isinstance(record, (tuple, list)) else record)
+            )
+
             # Add neighbor node
             neighbor_uuid = data.get('uuid', '')
             if neighbor_uuid and neighbor_uuid not in nodes and neighbor_uuid != entity_id:
                 labels = data.get('labels', [])
                 if isinstance(labels, str):
                     labels = [labels] if labels else []
-                
+
                 nodes[neighbor_uuid] = GraphNode(
                     id=neighbor_uuid,
                     name=data.get('name', ''),
                     labels=labels,
                     summary=data.get('summary', ''),
-                    attributes=data.get('attributes', {}) or {}
+                    attributes=data.get('attributes', {}) or {},
                 )
-            
+
             # Add edge
             edge_uuid = data.get('edge_uuid', '')
             if edge_uuid:
@@ -169,14 +173,10 @@ async def get_entity_neighbors(entity_id: str, graphiti: ZepGraphitiDep, depth: 
                         target_node_uuid=data.get('target_uuid', ''),
                         name=data.get('edge_name', ''),
                         fact=data.get('edge_fact', ''),
-                        created_at=data.get('edge_created_at', datetime.now(timezone.utc))
+                        created_at=data.get('edge_created_at', datetime.now(timezone.utc)),
                     )
                 )
-        
-        return NeighborsResponse(
-            center=center_node,
-            nodes=list(nodes.values()),
-            edges=edges
-        )
+
+        return NeighborsResponse(center=center_node, nodes=list(nodes.values()), edges=edges)
     except Exception as e:
         raise HTTPException(status_code=404, detail=f'Entity not found: {str(e)}')

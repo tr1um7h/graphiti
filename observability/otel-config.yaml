@@ -1,0 +1,88 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    limit_mib: 512
+    check_interval: 1s
+
+  tail_sampling:
+    decision_wait: 30s
+    num_traces: 50000
+    expected_new_traces_per_sec: 100
+    policies:
+      - name: errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: slow
+        type: latency
+        latency:
+          threshold_ms: 5000
+      - name: baseline
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+
+  attributes/sanitize:
+    actions:
+      - key: api_key
+        action: delete
+      - key: password
+        action: delete
+      - key: authorization
+        action: delete
+      - key: graphiti.db.query
+        action: delete
+      - key: graphiti.llm.prompt
+        action: delete
+
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+
+exporters:
+  # traces 必须使用 GreptimeDB 内置 trace pipeline，
+  # 否则 GreptimeDB v1.1 返回 "Pipeline is required for this API"。
+  otlphttp/greptime_traces:
+    endpoint: http://greptime:4000/v1/otlp
+    tls:
+      insecure: true
+    headers:
+      X-Greptime-Database: public
+      x-greptime-pipeline-name: greptime_trace_v1
+
+  # metrics/logs 不能复用 trace pipeline header，
+  # GreptimeDB logs handler 会拒绝 OtlpTraceDirectV1。
+  otlphttp/greptime_other:
+    endpoint: http://greptime:4000/v1/otlp
+    tls:
+      insecure: true
+    headers:
+      X-Greptime-Database: public
+
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, tail_sampling, attributes/sanitize, batch]
+      exporters: [otlphttp/greptime_traces, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/sanitize, batch]
+      exporters: [otlphttp/greptime_other]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/sanitize, batch]
+      exporters: [otlphttp/greptime_other]
+  telemetry:
+    logs:
+      level: info

@@ -2,7 +2,6 @@
 import re
 
 from fastapi import APIRouter, status
-
 from graphiti_core.driver.postgres_age.records import entity_edge_from_row
 from graphiti_core.edges import EntityEdge
 from graphiti_core.search.search_config import (
@@ -14,9 +13,10 @@ from graphiti_core.search.search_config import (
     NodeSearchMethod,
     SearchConfig,
 )
+
+from graph_service.config import get_settings
 from graph_service.dto.chat import ChatRequestDTO, ChatResponseDTO
 from graph_service.zep_graphiti import ZepGraphitiDep, get_fact_result_from_edge
-from graph_service.config import get_settings
 
 
 def _build_chat_search_config() -> SearchConfig:
@@ -45,6 +45,7 @@ def _build_chat_search_config() -> SearchConfig:
         ),
         limit=s.chat_search_limit,
     )
+
 
 router = APIRouter()
 
@@ -88,17 +89,21 @@ def _build_context_info(ctx) -> str:
         return '未指定'
     parts = []
     if ctx.context_id:
-        parts.append(f"ID={ctx.context_id}")
+        parts.append(f'ID={ctx.context_id}')
     if ctx.context_type:
-        parts.append(f"类型={ctx.context_type}")
+        parts.append(f'类型={ctx.context_type}')
     if ctx.context_name:
-        parts.append(f"名称={ctx.context_name}")
+        parts.append(f'名称={ctx.context_name}')
     return ', '.join(parts) if parts else '未指定'
 
 
-def _build_messages(search_text: str, context_info: str, scope_hint: str, history: list, user_message: str) -> list:
+def _build_messages(
+    search_text: str, context_info: str, scope_hint: str, history: list, user_message: str
+) -> list:
     system_content = CHAT_SYSTEM_PROMPT.format(
-        search_results=search_text, context_info=context_info, scope_hint=scope_hint,
+        search_results=search_text,
+        context_info=context_info,
+        scope_hint=scope_hint,
     )
     messages = [{'role': 'system', 'content': system_content}]
 
@@ -219,11 +224,7 @@ async def chat(request: ChatRequestDTO, graphiti: ZepGraphitiDep):
     # 5. Build search results text, context info, and scope hint
     search_text = _build_search_results_text(relevant_edges)
     context_info = _build_context_info(request.context)
-    scope_hint = (
-        '- 搜索范围：仅限当前分组的数据'
-        if group_ids
-        else '- 搜索范围：全部分组'
-    )
+    scope_hint = '- 搜索范围：仅限当前分组的数据' if group_ids else '- 搜索范围：全部分组'
 
     # 6. Build LLM messages
     llm_messages = _build_messages(
@@ -238,9 +239,7 @@ async def chat(request: ChatRequestDTO, graphiti: ZepGraphitiDep):
     from graphiti_core.llm_client.config import ModelSize
     from graphiti_core.prompts.models import Message
 
-    core_messages = [
-        Message(role=m['role'], content=m['content']) for m in llm_messages
-    ]
+    core_messages = [Message(role=m['role'], content=m['content']) for m in llm_messages]
 
     response = await graphiti.llm_client.generate_response(
         messages=core_messages,

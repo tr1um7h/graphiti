@@ -160,7 +160,11 @@ class PostgresAgeEntityNodeOperations(EntityNodeOperations):
         limit: int | None = None,
         uuid_cursor: str | None = None,
     ) -> list[EntityNode]:
-        params: dict[str, Any] = {'group_ids': group_ids, 'uuid_cursor': uuid_cursor, 'limit': limit}
+        params: dict[str, Any] = {
+            'group_ids': group_ids,
+            'uuid_cursor': uuid_cursor,
+            'limit': limit,
+        }
         limit_clause = 'LIMIT %(limit)s' if limit is not None else ''
         records, _, _ = await executor.execute_query(
             f"""
@@ -188,7 +192,9 @@ class PostgresAgeEntityNodeOperations(EntityNodeOperations):
         )
         if not records:
             raise NodeNotFoundError(node.uuid)
-        node.name_embedding = entity_node_from_row({**entity_node_to_row(node), **records[0]}).name_embedding
+        node.name_embedding = entity_node_from_row(
+            {**entity_node_to_row(node), **records[0]}
+        ).name_embedding
 
     async def load_embeddings_bulk(
         self,

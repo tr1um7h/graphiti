@@ -123,20 +123,30 @@ class PostgresAgeDriver(GraphDriver):
             )
         )
 
-    async def execute_query(self, cypher_query_: Any, **kwargs: Any) -> PostgresAgeResult:
+    async def execute_query(
+        self, cypher_query_: Any, *, query_type: str | None = None, **kwargs: Any
+    ) -> PostgresAgeResult:
         """Execute SQL directly; later AGE Cypher helpers will wrap graph queries."""
         await self._ensure_open()
         params = _query_params(kwargs.pop('params', None), kwargs)
 
-        async with self._pool.connection() as conn:
-            try:
-                await self._setup_connection(conn)
-                result = await _run_sql(conn, cypher_query_, params)
-                await conn.commit()
-                return result
-            except Exception:
-                await conn.rollback()
-                raise
+        with self.tracer.start_span('db.query') as span:
+            if query_type is not None:
+                span.add_attributes({'graphiti.db.query_type': query_type})
+            span.add_attributes({'graphiti.db.system': 'postgres_age'})
+            async with self._pool.connection() as conn:
+                try:
+                    await self._setup_connection(conn)
+                    result = await _run_sql(conn, cypher_query_, params)
+                    await conn.commit()
+                    row_count = len(result[0]) if result[0] else 0
+                    span.add_attributes({'graphiti.db.row_count': row_count})
+                    return result
+                except Exception as e:
+                    await conn.rollback()
+                    span.set_status('error', str(e))
+                    span.record_exception(e)
+                    raise
 
     async def execute_age_cypher(
         self,
@@ -146,8 +156,7 @@ class PostgresAgeDriver(GraphDriver):
         query = cypher_sql(self._deps, self.graph_name, cypher_query, columns)
         records, _, _ = await self.execute_query(query, params=None)
         return [
-            {key: decode_agtype_value(value) for key, value in record.items()}
-            for record in records
+            {key: decode_agtype_value(value) for key, value in record.items()} for record in records
         ]
 
     def session(self, database: str | None = None) -> GraphDriverSession:

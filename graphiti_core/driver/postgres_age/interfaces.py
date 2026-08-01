@@ -49,7 +49,9 @@ class PostgresAgeGraphOperationsInterface(GraphOperationsInterface):
         self, _cls: Any, driver: Any, group_id: str, batch_size: int = 100
     ) -> None:
         if _cls is EpisodicNode:
-            await driver.episode_node_ops.delete_by_group_id(driver, group_id, batch_size=batch_size)
+            await driver.episode_node_ops.delete_by_group_id(
+                driver, group_id, batch_size=batch_size
+            )
             return
         if _cls is CommunityNode:
             await driver.community_node_ops.delete_by_group_id(
@@ -109,7 +111,11 @@ class PostgresAgeGraphOperationsInterface(GraphOperationsInterface):
     ) -> dict[str, list[float]]:
         typed_nodes = [_model(EntityNode, node) for node in nodes]
         await driver.entity_node_ops.load_embeddings_bulk(driver, typed_nodes, batch_size)
-        return {node.uuid: node.name_embedding for node in typed_nodes if node.name_embedding is not None}
+        return {
+            node.uuid: node.name_embedding
+            for node in typed_nodes
+            if node.name_embedding is not None
+        }
 
     async def episodic_node_save(self, node: Any, driver: Any) -> None:
         await driver.episode_node_ops.save(driver, _model(EpisodicNode, node))
@@ -239,7 +245,9 @@ class PostgresAgeGraphOperationsInterface(GraphOperationsInterface):
         limit: int | None = None,
         uuid_cursor: str | None = None,
     ) -> list[Any]:
-        return await driver.community_node_ops.get_by_group_ids(driver, group_ids, limit, uuid_cursor)
+        return await driver.community_node_ops.get_by_group_ids(
+            driver, group_ids, limit, uuid_cursor
+        )
 
     async def saga_node_save(self, node: Any, driver: Any) -> None:
         await driver.saga_node_ops.save(driver, _model(SagaNode, node))
@@ -373,7 +381,11 @@ class PostgresAgeGraphOperationsInterface(GraphOperationsInterface):
     ) -> dict[str, list[float]]:
         typed_edges = [_model(EntityEdge, edge) for edge in edges]
         await driver.entity_edge_ops.load_embeddings_bulk(driver, typed_edges, batch_size)
-        return {edge.uuid: edge.fact_embedding for edge in typed_edges if edge.fact_embedding is not None}
+        return {
+            edge.uuid: edge.fact_embedding
+            for edge in typed_edges
+            if edge.fact_embedding is not None
+        }
 
     async def episodic_edge_save(self, edge: Any, driver: Any) -> None:
         await driver.episodic_edge_ops.save(driver, _model(EpisodicEdge, edge))
@@ -402,7 +414,9 @@ class PostgresAgeGraphOperationsInterface(GraphOperationsInterface):
         limit: int | None = None,
         uuid_cursor: str | None = None,
     ) -> list[Any]:
-        return await driver.episodic_edge_ops.get_by_group_ids(driver, group_ids, limit, uuid_cursor)
+        return await driver.episodic_edge_ops.get_by_group_ids(
+            driver, group_ids, limit, uuid_cursor
+        )
 
     async def community_edge_save(self, edge: Any, driver: Any) -> None:
         await driver.community_edge_ops.save(driver, _model(CommunityEdge, edge))
@@ -431,7 +445,9 @@ class PostgresAgeGraphOperationsInterface(GraphOperationsInterface):
         limit: int | None = None,
         uuid_cursor: str | None = None,
     ) -> list[Any]:
-        return await driver.community_edge_ops.get_by_group_ids(driver, group_ids, limit, uuid_cursor)
+        return await driver.community_edge_ops.get_by_group_ids(
+            driver, group_ids, limit, uuid_cursor
+        )
 
     async def has_episode_edge_save(self, edge: Any, driver: Any) -> None:
         await driver.has_episode_edge_ops.save(driver, _model(HasEpisodeEdge, edge))
@@ -472,7 +488,9 @@ class PostgresAgeGraphOperationsInterface(GraphOperationsInterface):
         limit: int | None = None,
         uuid_cursor: str | None = None,
     ) -> list[Any]:
-        return await driver.has_episode_edge_ops.get_by_group_ids(driver, group_ids, limit, uuid_cursor)
+        return await driver.has_episode_edge_ops.get_by_group_ids(
+            driver, group_ids, limit, uuid_cursor
+        )
 
     async def next_episode_edge_save(self, edge: Any, driver: Any) -> None:
         await driver.next_episode_edge_ops.save(driver, _model(NextEpisodeEdge, edge))
@@ -513,7 +531,9 @@ class PostgresAgeGraphOperationsInterface(GraphOperationsInterface):
         limit: int | None = None,
         uuid_cursor: str | None = None,
     ) -> list[Any]:
-        return await driver.next_episode_edge_ops.get_by_group_ids(driver, group_ids, limit, uuid_cursor)
+        return await driver.next_episode_edge_ops.get_by_group_ids(
+            driver, group_ids, limit, uuid_cursor
+        )
 
     async def get_mentioned_nodes(self, driver: Any, episodes: list[Any]) -> list[Any]:
         return await driver.graph_ops.get_mentioned_nodes(driver, episodes)
@@ -785,7 +805,9 @@ def _model(model: type[T], value: Any) -> T:
     return model(**value)
 
 
-def _rrf(results: list[list[str]], rank_const: int = 1, min_score: float = 0) -> tuple[list[str], list[float]]:
+def _rrf(
+    results: list[list[str]], rank_const: int = 1, min_score: float = 0
+) -> tuple[list[str], list[float]]:
     scores: dict[str, float] = defaultdict(float)
     for result in results:
         for index, uuid in enumerate(result):

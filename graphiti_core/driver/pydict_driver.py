@@ -140,7 +140,14 @@ class PyDictSearchInterfaceAdapter(SearchInterface):
         min_score: float = 0.7,
     ) -> list[Any]:
         return await self._ops.edge_similarity_search(
-            driver, search_vector, source_node_uuid, target_node_uuid, search_filter, group_ids, limit, min_score
+            driver,
+            search_vector,
+            source_node_uuid,
+            target_node_uuid,
+            search_filter,
+            group_ids,
+            limit,
+            min_score,
         )
 
     async def edge_bfs_search(
@@ -177,7 +184,9 @@ class PyDictSearchInterfaceAdapter(SearchInterface):
         limit: int = 100,
         min_score: float = 0.7,
     ) -> list[Any]:
-        return await self._ops.node_similarity_search(driver, search_vector, search_filter, group_ids, limit, min_score)
+        return await self._ops.node_similarity_search(
+            driver, search_vector, search_filter, group_ids, limit, min_score
+        )
 
     async def node_bfs_search(
         self,
@@ -190,7 +199,9 @@ class PyDictSearchInterfaceAdapter(SearchInterface):
     ) -> list[Any]:
         if bfs_origin_node_uuids is None:
             return []
-        return await self._ops.node_bfs_search(driver, bfs_origin_node_uuids, search_filter, bfs_max_depth, group_ids, limit)
+        return await self._ops.node_bfs_search(
+            driver, bfs_origin_node_uuids, search_filter, bfs_max_depth, group_ids, limit
+        )
 
     async def episode_fulltext_search(
         self,
@@ -200,7 +211,9 @@ class PyDictSearchInterfaceAdapter(SearchInterface):
         group_ids: list[str] | None = None,
         limit: int = 100,
     ) -> list[Any]:
-        return await self._ops.episode_fulltext_search(driver, query, search_filter, group_ids, limit)
+        return await self._ops.episode_fulltext_search(
+            driver, query, search_filter, group_ids, limit
+        )
 
     async def community_fulltext_search(
         self,
@@ -219,7 +232,9 @@ class PyDictSearchInterfaceAdapter(SearchInterface):
         limit: int = 100,
         min_score: float = 0.6,
     ) -> list[Any]:
-        return await self._ops.community_similarity_search(driver, search_vector, group_ids, limit, min_score)
+        return await self._ops.community_similarity_search(
+            driver, search_vector, group_ids, limit, min_score
+        )
 
     async def get_embeddings_for_communities(
         self,
@@ -239,7 +254,9 @@ class PyDictSearchInterfaceAdapter(SearchInterface):
         center_node_uuid: str,
         min_score: float = 0,
     ) -> tuple[list[str], list[float]]:
-        nodes = await self._ops.node_distance_reranker(driver, node_uuids, center_node_uuid, min_score)
+        nodes = await self._ops.node_distance_reranker(
+            driver, node_uuids, center_node_uuid, min_score
+        )
         return [n.uuid for n in nodes], [1.0] * len(nodes)
 
     async def episode_mentions_reranker(

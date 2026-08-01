@@ -146,17 +146,13 @@ class BaseOpenAIClient(LLMClient):
         try:
             return json.loads(text)
         except json.JSONDecodeError as json_err:
-            logger.warning(
-                f'JSON parse failed ({json_err}), attempting json_repair fallback'
-            )
+            logger.warning(f'JSON parse failed ({json_err}), attempting json_repair fallback')
             try:
                 from json_repair import repair_json
 
                 repaired = repair_json(text, return_objects=True)
             except ImportError:
-                logger.error(
-                    'json_repair not installed; cannot salvage malformed JSON'
-                )
+                logger.error('json_repair not installed; cannot salvage malformed JSON')
                 raise
             if not isinstance(repaired, dict):
                 raise json_err

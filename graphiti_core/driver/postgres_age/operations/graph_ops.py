@@ -257,7 +257,9 @@ async def _rebuild_edges(executor: QueryExecutor, tx: Transaction | None) -> Non
     await _rebuild_entity_edges(executor, tx)
     await _rebuild_simple_edges(executor, tx, 'episodic_edges', 'MENTIONS', 'Episodic', 'Entity')
     await _rebuild_community_edges(executor, tx)
-    await _rebuild_simple_edges(executor, tx, 'has_episode_edges', 'HAS_EPISODE', 'Saga', 'Episodic')
+    await _rebuild_simple_edges(
+        executor, tx, 'has_episode_edges', 'HAS_EPISODE', 'Saga', 'Episodic'
+    )
     await _rebuild_simple_edges(
         executor, tx, 'next_episode_edges', 'NEXT_EPISODE', 'Episodic', 'Episodic'
     )
@@ -357,9 +359,7 @@ async def _rebuild_community_edges(executor: QueryExecutor, tx: Transaction | No
         )
 
 
-async def _delete_dangling_community_edges(
-    executor: QueryExecutor, tx: Transaction | None
-) -> None:
+async def _delete_dangling_community_edges(executor: QueryExecutor, tx: Transaction | None) -> None:
     await run_statement(
         executor,
         tx,

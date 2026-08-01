@@ -46,7 +46,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /app/.venv --clear && \
     . /app/.venv/bin/activate && \
     uv pip install --no-deps -e ./graphiti_core && \
-    uv pip install pydantic psycopg[binary,pool] pgvector openai neo4j tenacity numpy python-dotenv posthog uvicorn fastapi httpx pydantic-settings
+   uv pip install pydantic psycopg[binary,pool] pgvector openai neo4j tenacity numpy python-dotenv uvicorn fastapi httpx pydantic-settings && \
+    uv pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
 
 # Change ownership to app user
 RUN chown -R app:app /app

@@ -94,7 +94,14 @@ class BGELargeZHEmbedder(EmbedderClient):
         if cache_dir:
             os.environ['SENTENCE_TRANSFORMERS_HOME'] = cache_dir
 
-        proxy_keys = ('all_proxy', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY')
+        proxy_keys = (
+            'all_proxy',
+            'ALL_PROXY',
+            'http_proxy',
+            'https_proxy',
+            'HTTP_PROXY',
+            'HTTPS_PROXY',
+        )
         saved_proxy = {k: os.environ.pop(k, None) for k in proxy_keys}
         try:
             os.environ['HF_HUB_OFFLINE'] = '1'
@@ -129,7 +136,7 @@ class BGELargeZHEmbedder(EmbedderClient):
             raise RuntimeError(
                 f'Could not load model {self.model_name}. '
                 f'Please ensure the model is cached or network is available for download. '
-                f"You can pre-download with: python -c \"from sentence_transformers import "
+                f'You can pre-download with: python -c "from sentence_transformers import '
                 f"SentenceTransformer; SentenceTransformer('{self.model_name}', "
                 f"model_kwargs={{'use_safetensors': False}})\""
             ) from download_error

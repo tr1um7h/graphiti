@@ -52,9 +52,6 @@ class Settings(BaseSettings):
     neo4j_user: str | None = Field(None)
     neo4j_password: str | None = Field(None)
 
-    # --- Telemetry --------------------------------------------------------
-    graphiti_telemetry_enabled: bool = Field(default=False)
-
     # --- Server -----------------------------------------------------------
     port: int = Field(default=8000, description='Server listen port')
 

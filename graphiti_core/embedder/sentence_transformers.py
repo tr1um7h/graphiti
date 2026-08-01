@@ -54,9 +54,7 @@ class SentenceTransformerEmbedder(EmbedderClient):
         if not self._model_loaded:
             from sentence_transformers import SentenceTransformer
 
-            self.model = SentenceTransformer(
-                self.config.model_name, device=self.config.device
-            )
+            self.model = SentenceTransformer(self.config.model_name, device=self.config.device)
             self._model_loaded = True
         return self.model
 

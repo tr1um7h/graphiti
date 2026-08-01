@@ -23,8 +23,8 @@ def _create_embedder(settings: Settings) -> EmbedderClient | None:
     """
     if settings.embedding_api_url:
         import httpx
-        from openai import AsyncOpenAI
         from graphiti_core.embedder import OpenAIEmbedder, OpenAIEmbedderConfig
+        from openai import AsyncOpenAI
 
         logger.info(f'Using remote embedding service: {settings.embedding_api_url}')
         config = OpenAIEmbedderConfig(
@@ -34,9 +34,7 @@ def _create_embedder(settings: Settings) -> EmbedderClient | None:
             embedding_dim=settings.postgres_age_embedding_dimension,
         )
         # Use a generous timeout for local embedding services that may be slow
-        http_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(120.0, connect=10.0), trust_env=False
-        )
+        http_client = httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0), trust_env=False)
         client = AsyncOpenAI(
             api_key=config.api_key,
             base_url=config.base_url,
@@ -109,12 +107,15 @@ class ZepGraphiti(Graphiti):
         llm_client: LLMClient | None = None,
         embedder: EmbedderClient | None = None,
         graph_driver=None,
+        tracer=None,
     ):
         # Support both Neo4j and custom graph_driver
         if graph_driver is not None:
-            super().__init__(graph_driver=graph_driver, llm_client=llm_client, embedder=embedder)
+            super().__init__(
+                graph_driver=graph_driver, llm_client=llm_client, embedder=embedder, tracer=tracer
+            )
         else:
-            super().__init__(uri, user, password, llm_client, embedder=embedder)
+            super().__init__(uri, user, password, llm_client, embedder=embedder, tracer=tracer)
 
     async def save_entity_node(self, name: str, uuid: str, group_id: str, summary: str = ''):
         new_node = EntityNode(
@@ -186,7 +187,12 @@ def _build_client(settings: Settings) -> ZepGraphiti:
     embedder = _create_embedder(settings)
     llm_client = _create_llm_client(settings)
     driver = _create_driver(settings)
-    client = ZepGraphiti(graph_driver=driver, embedder=embedder, llm_client=llm_client)
+    from graph_service.observability import setup_tracing
+
+    tracer = setup_tracing()
+    client = ZepGraphiti(
+        graph_driver=driver, embedder=embedder, llm_client=llm_client, tracer=tracer
+    )
 
     # Apply LLM overrides on the default client (when _create_llm_client returned None)
     if llm_client is None:

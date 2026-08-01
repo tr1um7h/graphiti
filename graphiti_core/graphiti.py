@@ -73,7 +73,6 @@ from graphiti_core.search.search_utils import (
     RELEVANT_SCHEMA_LIMIT,
     get_mentioned_nodes,
 )
-from graphiti_core.telemetry import capture_event
 from graphiti_core.tracer import Tracer, create_tracer
 from graphiti_core.utils.bulk_utils import (
     RawEpisode,
@@ -273,6 +272,12 @@ class Graphiti:
 
         # Set tracer on clients
         self.llm_client.set_tracer(self.tracer)
+        self.driver.set_tracer(self.tracer)
+
+        # Wrap embedder with tracing (no changes to embedder implementations)
+        from graphiti_core.observability.tracing_embedder import TracingEmbedder
+
+        self.embedder = TracingEmbedder(self.embedder, self.tracer)
 
         self.clients = GraphitiClients(
             driver=self.driver,
@@ -286,30 +291,6 @@ class Graphiti:
         self.nodes = NodeNamespace(self.driver, self.embedder)
         self.edges = EdgeNamespace(self.driver, self.embedder)
 
-        # Capture telemetry event
-        self._capture_initialization_telemetry()
-
-    def _capture_initialization_telemetry(self):
-        """Capture telemetry event for Graphiti initialization."""
-        try:
-            # Detect provider types from class names
-            llm_provider = self._get_provider_type(self.llm_client)
-            embedder_provider = self._get_provider_type(self.embedder)
-            reranker_provider = self._get_provider_type(self.cross_encoder)
-            database_provider = self._get_provider_type(self.driver)
-
-            properties = {
-                'llm_provider': llm_provider,
-                'embedder_provider': embedder_provider,
-                'reranker_provider': reranker_provider,
-                'database_provider': database_provider,
-            }
-
-            capture_event('graphiti_initialized', properties)
-        except Exception:
-            # Silently handle telemetry errors
-            pass
-
     @property
     def token_tracker(self):
         """Access the LLM client's token usage tracker.
@@ -321,37 +302,6 @@ class Graphiti:
         - Reset tracking: tracker.reset()
         """
         return self.llm_client.token_tracker
-
-    def _get_provider_type(self, client) -> str:
-        """Get provider type from client class name."""
-        if client is None:
-            return 'none'
-
-        class_name = client.__class__.__name__.lower()
-
-        # LLM providers
-        if 'openai' in class_name:
-            return 'openai'
-        elif 'azure' in class_name:
-            return 'azure'
-        elif 'anthropic' in class_name:
-            return 'anthropic'
-        elif 'crossencoder' in class_name:
-            return 'crossencoder'
-        elif 'gemini' in class_name:
-            return 'gemini'
-        elif 'groq' in class_name:
-            return 'groq'
-        # Database providers
-        elif 'neo4j' in class_name:
-            return 'neo4j'
-        elif 'falkor' in class_name:
-            return 'falkordb'
-        # Embedder providers
-        elif 'voyage' in class_name:
-            return 'voyage'
-        else:
-            return 'unknown'
 
     async def close(self):
         """
@@ -516,98 +466,100 @@ class Graphiti:
         NodeNotFoundError
             If the saga with the given UUID does not exist.
         """
-        saga = await SagaNode.get_by_uuid(self.driver, saga_id)
+        with self.tracer.start_span('summarize_saga') as span:
+            saga = await SagaNode.get_by_uuid(self.driver, saga_id)
+            span.add_attributes({'saga.uuid': saga_id})
 
-        # Fetch only episodes added since the last summary (or all if never summarized).
-        max_episodes = 200
-        since = saga.last_summarized_at
+            # Fetch only episodes added since the last summary (or all if never summarized).
+            max_episodes = 200
+            since = saga.last_summarized_at
 
-        # Try IoC interface first, fall back to raw Cypher
-        episodes_data = await self._saga_get_episode_contents(
-            saga_id, since=since, limit=max_episodes
-        )
-        if episodes_data is None:
-            if since is not None:
-                records, _, _ = await self.driver.execute_query(
-                    """
-                    MATCH (s:Saga {uuid: $saga_uuid})-[:HAS_EPISODE]->(e:Episodic)
-                    WHERE e.created_at > $since
-                    RETURN e.content AS content, e.valid_at AS valid_at
-                    ORDER BY e.valid_at ASC, e.created_at ASC
-                    LIMIT $limit
-                    """,
-                    saga_uuid=saga_id,
-                    since=since,
-                    limit=max_episodes,
-                    routing_='r',
-                )
-            else:
-                records, _, _ = await self.driver.execute_query(
-                    """
-                    MATCH (s:Saga {uuid: $saga_uuid})-[:HAS_EPISODE]->(e:Episodic)
-                    RETURN e.content AS content, e.valid_at AS valid_at
-                    ORDER BY e.valid_at DESC, e.created_at DESC
-                    LIMIT $limit
-                    """,
-                    saga_uuid=saga_id,
-                    limit=max_episodes,
-                    routing_='r',
-                )
-                # Reverse to chronological order for the prompt
-                records = list(reversed(records))
+            # Try IoC interface first, fall back to raw Cypher
+            episodes_data = await self._saga_get_episode_contents(
+                saga_id, since=since, limit=max_episodes
+            )
+            if episodes_data is None:
+                if since is not None:
+                    records, _, _ = await self.driver.execute_query(
+                        """
+                        MATCH (s:Saga {uuid: $saga_uuid})-[:HAS_EPISODE]->(e:Episodic)
+                        WHERE e.created_at > $since
+                        RETURN e.content AS content, e.valid_at AS valid_at
+                        ORDER BY e.valid_at ASC, e.created_at ASC
+                        LIMIT $limit
+                        """,
+                        saga_uuid=saga_id,
+                        since=since,
+                        limit=max_episodes,
+                        routing_='r',
+                    )
+                else:
+                    records, _, _ = await self.driver.execute_query(
+                        """
+                        MATCH (s:Saga {uuid: $saga_uuid})-[:HAS_EPISODE]->(e:Episodic)
+                        RETURN e.content AS content, e.valid_at AS valid_at
+                        ORDER BY e.valid_at DESC, e.created_at DESC
+                        LIMIT $limit
+                        """,
+                        saga_uuid=saga_id,
+                        limit=max_episodes,
+                        routing_='r',
+                    )
+                    # Reverse to chronological order for the prompt
+                    records = list(reversed(records))
 
-            from graphiti_core.helpers import parse_db_date
+                from graphiti_core.helpers import parse_db_date
 
-            episodes_data = [
-                (r['content'], parse_db_date(r.get('valid_at')))
-                for r in records
-                if r.get('content')
-            ]
+                episodes_data = [
+                    (r['content'], parse_db_date(r.get('valid_at')))
+                    for r in records
+                    if r.get('content')
+                ]
 
-        if not episodes_data:
-            logger.info(f'No new episodes found for saga {saga_id}, skipping summary')
+            if not episodes_data:
+                logger.info(f'No new episodes found for saga {saga_id}, skipping summary')
+                return saga
+
+            episode_contents = [content for content, _ in episodes_data]
+            valid_ats = [valid_at for _, valid_at in episodes_data if valid_at is not None]
+
+            context = {
+                'saga_name': saga.name,
+                'existing_summary': saga.summary or '',
+                'episodes': episode_contents,
+            }
+
+            llm_response = await self.llm_client.generate_response(
+                prompt_library.summarize_sagas.summarize_saga(context),
+                response_model=SagaSummary,
+                prompt_name='summarize_sagas.summarize_saga',
+            )
+
+            summary = llm_response.get('summary', '')
+            if len(summary) > MAX_SUMMARY_CHARS:
+                summary = summary[:MAX_SUMMARY_CHARS]
+
+            saga.summary = summary
+            # Wall-clock watermark for the next-run filter: keeps backfilled
+            # episodes (valid_at in the past, created_at = now) reachable on
+            # subsequent runs.
+            saga.last_summarized_at = utc_now()
+            # Episode-time watermark for public/temporal consumers: advance only
+            # forward to the latest reference time we just summarized. If no
+            # episode in this batch carried a valid_at, leave the previous value
+            # unchanged so the field never regresses.
+            if valid_ats:
+                new_episode_watermark = max(valid_ats)
+                if (
+                    saga.last_summarized_episode_valid_at is None
+                    or new_episode_watermark > saga.last_summarized_episode_valid_at
+                ):
+                    saga.last_summarized_episode_valid_at = new_episode_watermark
+            await saga.save(self.driver)
+
+            logger.info(f'Updated summary for saga {saga_id}')
+
             return saga
-
-        episode_contents = [content for content, _ in episodes_data]
-        valid_ats = [valid_at for _, valid_at in episodes_data if valid_at is not None]
-
-        context = {
-            'saga_name': saga.name,
-            'existing_summary': saga.summary or '',
-            'episodes': episode_contents,
-        }
-
-        llm_response = await self.llm_client.generate_response(
-            prompt_library.summarize_sagas.summarize_saga(context),
-            response_model=SagaSummary,
-            prompt_name='summarize_sagas.summarize_saga',
-        )
-
-        summary = llm_response.get('summary', '')
-        if len(summary) > MAX_SUMMARY_CHARS:
-            summary = summary[:MAX_SUMMARY_CHARS]
-
-        saga.summary = summary
-        # Wall-clock watermark for the next-run filter: keeps backfilled
-        # episodes (valid_at in the past, created_at = now) reachable on
-        # subsequent runs.
-        saga.last_summarized_at = utc_now()
-        # Episode-time watermark for public/temporal consumers: advance only
-        # forward to the latest reference time we just summarized. If no
-        # episode in this batch carried a valid_at, leave the previous value
-        # unchanged so the field never regresses.
-        if valid_ats:
-            new_episode_watermark = max(valid_ats)
-            if (
-                saga.last_summarized_episode_valid_at is None
-                or new_episode_watermark > saga.last_summarized_episode_valid_at
-            ):
-                saga.last_summarized_episode_valid_at = new_episode_watermark
-        await saga.save(self.driver)
-
-        logger.info(f'Updated summary for saga {saga_id}')
-
-        return saga
 
     async def build_indices_and_constraints(self, delete_existing: bool = False):
         """
@@ -1770,31 +1722,33 @@ class Graphiti:
         group_ids : list[str] | None
             Optional. Create communities only for the listed group_ids. If blank the entire graph will be used.
         """
-        if driver is None:
-            driver = self.clients.driver
+        with self.tracer.start_span('build_communities') as span:
+            span.add_attributes({'group_ids': str(group_ids) if group_ids else 'all'})
+            if driver is None:
+                driver = self.clients.driver
 
-        # Clear existing communities
-        await remove_communities(driver)
+            # Clear existing communities
+            await remove_communities(driver)
 
-        community_nodes, community_edges = await build_communities(
-            driver, self.llm_client, group_ids
-        )
+            community_nodes, community_edges = await build_communities(
+                driver, self.llm_client, group_ids
+            )
 
-        await semaphore_gather(
-            *[node.generate_name_embedding(self.embedder) for node in community_nodes],
-            max_coroutines=self.max_coroutines,
-        )
+            await semaphore_gather(
+                *[node.generate_name_embedding(self.embedder) for node in community_nodes],
+                max_coroutines=self.max_coroutines,
+            )
 
-        await semaphore_gather(
-            *[node.save(driver) for node in community_nodes],
-            max_coroutines=self.max_coroutines,
-        )
-        await semaphore_gather(
-            *[edge.save(driver) for edge in community_edges],
-            max_coroutines=self.max_coroutines,
-        )
+            await semaphore_gather(
+                *[node.save(driver) for node in community_nodes],
+                max_coroutines=self.max_coroutines,
+            )
+            await semaphore_gather(
+                *[edge.save(driver) for edge in community_edges],
+                max_coroutines=self.max_coroutines,
+            )
 
-        return community_nodes, community_edges
+            return community_nodes, community_edges
 
     @handle_multiple_group_ids
     async def search(
@@ -1839,24 +1793,33 @@ class Graphiti:
         The search is performed using the current date and time as the reference
         point for temporal relevance.
         """
-        search_config = (
-            EDGE_HYBRID_SEARCH_RRF if center_node_uuid is None else EDGE_HYBRID_SEARCH_NODE_DISTANCE
-        )
-        search_config.limit = num_results
-
-        edges = (
-            await search(
-                self.clients,
-                query,
-                group_ids,
-                search_config,
-                search_filter if search_filter is not None else SearchFilters(),
-                driver=driver,
-                center_node_uuid=center_node_uuid,
+        with self.tracer.start_span('search') as span:
+            span.add_attributes(
+                {
+                    'search.type': 'node_distance' if center_node_uuid else 'hybrid',
+                    'search.limit': num_results,
+                }
             )
-        ).edges
+            search_config = (
+                EDGE_HYBRID_SEARCH_RRF
+                if center_node_uuid is None
+                else EDGE_HYBRID_SEARCH_NODE_DISTANCE
+            )
+            search_config.limit = num_results
 
-        return edges
+            edges = (
+                await search(
+                    self.clients,
+                    query,
+                    group_ids,
+                    search_config,
+                    search_filter if search_filter is not None else SearchFilters(),
+                    driver=driver,
+                    center_node_uuid=center_node_uuid,
+                )
+            ).edges
+
+            return edges
 
     async def _search(
         self,
@@ -1889,17 +1852,18 @@ class Graphiti:
 
         For different config recipes refer to search/search_config_recipes.
         """
-
-        return await search(
-            self.clients,
-            query,
-            group_ids,
-            config,
-            search_filter if search_filter is not None else SearchFilters(),
-            center_node_uuid,
-            bfs_origin_node_uuids,
-            driver=driver,
-        )
+        with self.tracer.start_span('search') as span:
+            span.add_attributes({'search.type': getattr(config, 'search_type', 'custom')})
+            return await search(
+                self.clients,
+                query,
+                group_ids,
+                config,
+                search_filter if search_filter is not None else SearchFilters(),
+                center_node_uuid,
+                bfs_origin_node_uuids,
+                driver=driver,
+            )
 
     async def get_nodes_and_edges_by_episode(self, episode_uuids: list[str]) -> SearchResults:
         episodes = await EpisodicNode.get_by_uuids(self.driver, episode_uuids)
@@ -1918,171 +1882,183 @@ class Graphiti:
     async def add_triplet(
         self, source_node: EntityNode, edge: EntityEdge, target_node: EntityNode
     ) -> AddTripletResults:
-        if source_node.name_embedding is None:
-            await source_node.generate_name_embedding(self.embedder)
-        if target_node.name_embedding is None:
-            await target_node.generate_name_embedding(self.embedder)
-        if edge.fact_embedding is None:
-            await edge.generate_embedding(self.embedder)
-
-        try:
-            resolved_source = await EntityNode.get_by_uuid(self.driver, source_node.uuid)
-        except NodeNotFoundError:
-            resolved_source_nodes, _, _ = await resolve_extracted_nodes(
-                self.clients,
-                [source_node],
+        with self.tracer.start_span('add_triplet') as span:
+            span.add_attributes(
+                {
+                    'source_node.name': source_node.name,
+                    'target_node.name': target_node.name,
+                    'edge.name': edge.name,
+                }
             )
-            resolved_source = resolved_source_nodes[0]
+            if source_node.name_embedding is None:
+                await source_node.generate_name_embedding(self.embedder)
+            if target_node.name_embedding is None:
+                await target_node.generate_name_embedding(self.embedder)
+            if edge.fact_embedding is None:
+                await edge.generate_embedding(self.embedder)
 
-        try:
-            resolved_target = await EntityNode.get_by_uuid(self.driver, target_node.uuid)
-        except NodeNotFoundError:
-            resolved_target_nodes, _, _ = await resolve_extracted_nodes(
-                self.clients,
-                [target_node],
-            )
-            resolved_target = resolved_target_nodes[0]
-
-        nodes = [resolved_source, resolved_target]
-
-        # Merge user-provided properties from original nodes into resolved nodes (excluding uuid)
-        # Update attributes dictionary (merge rather than replace)
-        if source_node.attributes:
-            resolved_source.attributes.update(source_node.attributes)
-        if target_node.attributes:
-            resolved_target.attributes.update(target_node.attributes)
-
-        # Update summary if provided by user (non-empty string)
-        if source_node.summary:
-            resolved_source.summary = source_node.summary
-        if target_node.summary:
-            resolved_target.summary = target_node.summary
-
-        # Update labels (merge with existing)
-        if source_node.labels:
-            resolved_source.labels = list(set(resolved_source.labels) | set(source_node.labels))
-        if target_node.labels:
-            resolved_target.labels = list(set(resolved_target.labels) | set(target_node.labels))
-
-        edge.source_node_uuid = resolved_source.uuid
-        edge.target_node_uuid = resolved_target.uuid
-
-        # Check if an edge with this UUID already exists with different source/target nodes.
-        # If so, generate a new UUID to create a new edge instead of overwriting.
-        try:
-            existing_edge = await EntityEdge.get_by_uuid(self.driver, edge.uuid)
-            # Edge exists - check if source/target nodes match
-            if (
-                existing_edge.source_node_uuid != edge.source_node_uuid
-                or existing_edge.target_node_uuid != edge.target_node_uuid
-            ):
-                # Source/target mismatch - generate new UUID to create a new edge
-                old_uuid = edge.uuid
-                edge.uuid = str(uuid4())
-                logger.info(
-                    f'Edge UUID {old_uuid} already exists with different source/target nodes. '
-                    f'Generated new UUID {edge.uuid} to avoid overwriting.'
+            try:
+                resolved_source = await EntityNode.get_by_uuid(self.driver, source_node.uuid)
+            except NodeNotFoundError:
+                resolved_source_nodes, _, _ = await resolve_extracted_nodes(
+                    self.clients,
+                    [source_node],
                 )
-        except EdgeNotFoundError:
-            # Edge doesn't exist yet, proceed normally
-            pass
+                resolved_source = resolved_source_nodes[0]
 
-        valid_edges = await EntityEdge.get_between_nodes(
-            self.driver, edge.source_node_uuid, edge.target_node_uuid
-        )
+            try:
+                resolved_target = await EntityNode.get_by_uuid(self.driver, target_node.uuid)
+            except NodeNotFoundError:
+                resolved_target_nodes, _, _ = await resolve_extracted_nodes(
+                    self.clients,
+                    [target_node],
+                )
+                resolved_target = resolved_target_nodes[0]
 
-        related_edges = (
-            await search(
-                self.clients,
-                edge.fact,
-                group_ids=[edge.group_id],
-                config=EDGE_HYBRID_SEARCH_RRF,
-                search_filter=SearchFilters(edge_uuids=[edge.uuid for edge in valid_edges]),
+            nodes = [resolved_source, resolved_target]
+
+            # Merge user-provided properties from original nodes into resolved nodes (excluding uuid)
+            # Update attributes dictionary (merge rather than replace)
+            if source_node.attributes:
+                resolved_source.attributes.update(source_node.attributes)
+            if target_node.attributes:
+                resolved_target.attributes.update(target_node.attributes)
+
+            # Update summary if provided by user (non-empty string)
+            if source_node.summary:
+                resolved_source.summary = source_node.summary
+            if target_node.summary:
+                resolved_target.summary = target_node.summary
+
+            # Update labels (merge with existing)
+            if source_node.labels:
+                resolved_source.labels = list(set(resolved_source.labels) | set(source_node.labels))
+            if target_node.labels:
+                resolved_target.labels = list(set(resolved_target.labels) | set(target_node.labels))
+
+            edge.source_node_uuid = resolved_source.uuid
+            edge.target_node_uuid = resolved_target.uuid
+
+            # Check if an edge with this UUID already exists with different source/target nodes.
+            # If so, generate a new UUID to create a new edge instead of overwriting.
+            try:
+                existing_edge = await EntityEdge.get_by_uuid(self.driver, edge.uuid)
+                # Edge exists - check if source/target nodes match
+                if (
+                    existing_edge.source_node_uuid != edge.source_node_uuid
+                    or existing_edge.target_node_uuid != edge.target_node_uuid
+                ):
+                    # Source/target mismatch - generate new UUID to create a new edge
+                    old_uuid = edge.uuid
+                    edge.uuid = str(uuid4())
+                    logger.info(
+                        f'Edge UUID {old_uuid} already exists with different source/target nodes. '
+                        f'Generated new UUID {edge.uuid} to avoid overwriting.'
+                    )
+            except EdgeNotFoundError:
+                # Edge doesn't exist yet, proceed normally
+                pass
+
+            valid_edges = await EntityEdge.get_between_nodes(
+                self.driver, edge.source_node_uuid, edge.target_node_uuid
             )
-        ).edges
-        existing_edges = (
-            await search(
-                self.clients,
-                edge.fact,
-                group_ids=[edge.group_id],
-                config=EDGE_HYBRID_SEARCH_RRF,
-                search_filter=SearchFilters(),
+
+            related_edges = (
+                await search(
+                    self.clients,
+                    edge.fact,
+                    group_ids=[edge.group_id],
+                    config=EDGE_HYBRID_SEARCH_RRF,
+                    search_filter=SearchFilters(edge_uuids=[edge.uuid for edge in valid_edges]),
+                )
+            ).edges
+            existing_edges = (
+                await search(
+                    self.clients,
+                    edge.fact,
+                    group_ids=[edge.group_id],
+                    config=EDGE_HYBRID_SEARCH_RRF,
+                    search_filter=SearchFilters(),
+                )
+            ).edges
+
+            resolved_edge, invalidated_edges, _ = await resolve_extracted_edge(
+                self.llm_client,
+                edge,
+                related_edges,
+                existing_edges,
+                EpisodicNode(
+                    name='',
+                    source=EpisodeType.text,
+                    source_description='',
+                    content='',
+                    valid_at=edge.valid_at or utc_now(),
+                    entity_edges=[],
+                    group_id=edge.group_id,
+                ),
+                None,
             )
-        ).edges
 
-        resolved_edge, invalidated_edges, _ = await resolve_extracted_edge(
-            self.llm_client,
-            edge,
-            related_edges,
-            existing_edges,
-            EpisodicNode(
-                name='',
-                source=EpisodeType.text,
-                source_description='',
-                content='',
-                valid_at=edge.valid_at or utc_now(),
-                entity_edges=[],
-                group_id=edge.group_id,
-            ),
-            None,
-        )
+            edges: list[EntityEdge] = [resolved_edge] + invalidated_edges
 
-        edges: list[EntityEdge] = [resolved_edge] + invalidated_edges
+            await create_entity_edge_embeddings(self.embedder, edges)
+            await create_entity_node_embeddings(self.embedder, nodes)
 
-        await create_entity_edge_embeddings(self.embedder, edges)
-        await create_entity_node_embeddings(self.embedder, nodes)
-
-        await add_nodes_and_edges_bulk(self.driver, [], [], nodes, edges, self.embedder)
-        return AddTripletResults(edges=edges, nodes=nodes)
+            await add_nodes_and_edges_bulk(self.driver, [], [], nodes, edges, self.embedder)
+            return AddTripletResults(edges=edges, nodes=nodes)
 
     async def remove_episode(self, episode_uuid: str):
-        # Find the episode to be deleted
-        episode = await EpisodicNode.get_by_uuid(self.driver, episode_uuid)
+        with self.tracer.start_span('remove_episode') as span:
+            span.add_attributes({'episode.uuid': episode_uuid})
+            # Find the episode to be deleted
+            episode = await EpisodicNode.get_by_uuid(self.driver, episode_uuid)
 
-        # Find edges mentioned by the episode
-        edges = await EntityEdge.get_by_uuids(self.driver, episode.entity_edges)
+            # Find edges mentioned by the episode
+            edges = await EntityEdge.get_by_uuids(self.driver, episode.entity_edges)
 
-        # Classify edges: delete (solely owned) vs update (shared with other episodes)
-        edges_to_delete: list[EntityEdge] = []
-        edges_to_update: list[EntityEdge] = []
-        for edge in edges:
-            if not edge.episodes or episode.uuid not in edge.episodes:
-                continue
-            if len(edge.episodes) == 1:
-                edges_to_delete.append(edge)
-            else:
-                edge.episodes = [ep for ep in edge.episodes if ep != episode.uuid]
-                edges_to_update.append(edge)
+            # Classify edges: delete (solely owned) vs update (shared with other episodes)
+            edges_to_delete: list[EntityEdge] = []
+            edges_to_update: list[EntityEdge] = []
+            for edge in edges:
+                if not edge.episodes or episode.uuid not in edge.episodes:
+                    continue
+                if len(edge.episodes) == 1:
+                    edges_to_delete.append(edge)
+                else:
+                    edge.episodes = [ep for ep in edge.episodes if ep != episode.uuid]
+                    edges_to_update.append(edge)
 
-        # Find nodes mentioned by the episode
-        nodes = await get_mentioned_nodes(self.driver, [episode])
-        # We should delete all nodes that are only mentioned in the deleted episode
-        nodes_to_delete: list[EntityNode] = []
-        for node in nodes:
-            if self.driver.provider == GraphProvider.POSTGRES_AGE:
-                query: LiteralString = (
-                    'SELECT count(*) AS episode_count '
-                    'FROM episodic_edges WHERE target_node_uuid = %(uuid)s'
-                )
-                records, _, _ = await self.driver.execute_query(
-                    query, params={'uuid': node.uuid}, routing_='r'
-                )
-            else:
-                query = (
-                    'MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) '
-                    'RETURN count(*) AS episode_count'
-                )
-                records, _, _ = await self.driver.execute_query(query, uuid=node.uuid, routing_='r')
+            # Find nodes mentioned by the episode
+            nodes = await get_mentioned_nodes(self.driver, [episode])
+            # We should delete all nodes that are only mentioned in the deleted episode
+            nodes_to_delete: list[EntityNode] = []
+            for node in nodes:
+                if self.driver.provider == GraphProvider.POSTGRES_AGE:
+                    query: LiteralString = (
+                        'SELECT count(*) AS episode_count '
+                        'FROM episodic_edges WHERE target_node_uuid = %(uuid)s'
+                    )
+                    records, _, _ = await self.driver.execute_query(
+                        query, params={'uuid': node.uuid}, routing_='r'
+                    )
+                else:
+                    query = (
+                        'MATCH (e:Episodic)-[:MENTIONS]->(n:Entity {uuid: $uuid}) '
+                        'RETURN count(*) AS episode_count'
+                    )
+                    records, _, _ = await self.driver.execute_query(
+                        query, uuid=node.uuid, routing_='r'
+                    )
 
-            for record in records:
-                if int(record['episode_count']) == 1:
-                    nodes_to_delete.append(node)
+                for record in records:
+                    if int(record['episode_count']) == 1:
+                        nodes_to_delete.append(node)
 
-        # Update shared edges: remove this episode's UUID from their episodes array
-        for edge in edges_to_update:
-            await edge.save(self.driver)
+            # Update shared edges: remove this episode's UUID from their episodes array
+            for edge in edges_to_update:
+                await edge.save(self.driver)
 
-        await Edge.delete_by_uuids(self.driver, [edge.uuid for edge in edges_to_delete])
-        await Node.delete_by_uuids(self.driver, [node.uuid for node in nodes_to_delete])
+            await Edge.delete_by_uuids(self.driver, [edge.uuid for edge in edges_to_delete])
+            await Node.delete_by_uuids(self.driver, [node.uuid for node in nodes_to_delete])
 
-        await episode.delete(self.driver)
+            await episode.delete(self.driver)

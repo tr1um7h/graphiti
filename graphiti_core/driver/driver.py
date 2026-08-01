@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 from graphiti_core.driver.graph_operations.graph_operations import GraphOperationsInterface
 from graphiti_core.driver.query_executor import QueryExecutor, Transaction
 from graphiti_core.driver.search_interface.search_interface import SearchInterface
+from graphiti_core.tracer import NoOpTracer, Tracer
 
 if TYPE_CHECKING:
     from graphiti_core.driver.operations.community_edge_ops import CommunityEdgeOperations
@@ -96,6 +97,12 @@ class GraphDriver(QueryExecutor, ABC):
     )
     _database: str
     default_group_id: str = ''
+    tracer: Tracer = NoOpTracer()
+
+    def set_tracer(self, tracer: Tracer) -> None:
+        """Set the tracer for this driver."""
+        self.tracer = tracer
+
     # Legacy interfaces (kept for backwards compatibility during Phase 1)
     search_interface: SearchInterface | None = None
     graph_operations_interface: GraphOperationsInterface | None = None

@@ -1,3 +1,4 @@
+from .chat import ChatContextDTO, ChatMessageDTO, ChatRequestDTO, ChatResponseDTO
 from .common import Message, Result
 from .graph import (
     EntityDetailResponse,
@@ -25,7 +26,6 @@ from .preview import (
     PreviewMemoryResponse,
     PreviewTaskStatus,
 )
-from .chat import ChatContextDTO, ChatMessageDTO, ChatRequestDTO, ChatResponseDTO
 from .retrieve import FactResult, GetMemoryRequest, GetMemoryResponse, SearchQuery, SearchResults
 from .schemas import (
     AttributeDefinition,

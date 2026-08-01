@@ -686,8 +686,7 @@ async def _resolve_with_llm(
         # 根据 OWL type_validation 处理结果
         if type_validation == 'unknown_type':
             logger.warning(
-                'Entity "%s" has unknown type not in ontology: %s. '
-                'Proceeding as new entity.',
+                'Entity "%s" has unknown type not in ontology: %s. Proceeding as new entity.',
                 extracted_node.name,
                 extracted_node.labels,
             )
@@ -708,10 +707,12 @@ async def _resolve_with_llm(
                 extracted_node, candidates_by_id[duplicate_candidate_id]
             )
             # Update labels if matched_ontology_type is more specific
-            if matched_ontology_type and matched_ontology_type != 'Entity' and matched_ontology_type not in resolved_node.labels:
-                resolved_node.labels = list(
-                    set(resolved_node.labels) | {matched_ontology_type}
-                )
+            if (
+                matched_ontology_type
+                and matched_ontology_type != 'Entity'
+                and matched_ontology_type not in resolved_node.labels
+            ):
+                resolved_node.labels = list(set(resolved_node.labels) | {matched_ontology_type})
         else:
             logger.warning(
                 'Invalid duplicate_candidate_id %d for extracted node %s; treating as no duplicate.',

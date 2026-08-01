@@ -364,9 +364,7 @@ class PostgresAgeSpike:
                 raise KeyError(uuid)
             return dict(row)
 
-    async def vector_search_entity_uuids(
-        self, embedding: Sequence[float], limit: int
-    ) -> list[str]:
+    async def vector_search_entity_uuids(self, embedding: Sequence[float], limit: int) -> list[str]:
         self._validate_search_limit(limit)
 
         async with self.connection() as conn, conn.cursor(row_factory=dict_row) as cur:

@@ -73,8 +73,7 @@ HNSW_INDEX_SPECS: tuple[tuple[str, str, str], ...] = (
 )
 
 INDEX_NAMES: tuple[str, ...] = tuple(
-    index_name
-    for index_name, *_rest in B_TREE_INDEX_SPECS + GIN_INDEX_SPECS + HNSW_INDEX_SPECS
+    index_name for index_name, *_rest in B_TREE_INDEX_SPECS + GIN_INDEX_SPECS + HNSW_INDEX_SPECS
 )
 
 VECTOR_COLUMNS: tuple[tuple[str, str], ...] = (

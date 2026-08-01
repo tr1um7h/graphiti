@@ -138,10 +138,13 @@ class OpenAIGenericClient(LLMClient):
                         injected = True
                         break
                 if not injected:
-                    openai_messages.insert(0, {
-                        'role': 'system',
-                        'content': schema_instruction.strip(),
-                    })
+                    openai_messages.insert(
+                        0,
+                        {
+                            'role': 'system',
+                            'content': schema_instruction.strip(),
+                        },
+                    )
                 # Use json_object instead of json_schema for broader compatibility
                 response_format = {'type': 'json_object'}
 
@@ -172,9 +175,7 @@ class OpenAIGenericClient(LLMClient):
             # Try to extract JSON from there as a fallback.
             if not result:
                 reasoning = (
-                    getattr(msg, 'reasoning_content', None)
-                    or getattr(msg, 'reasoning', None)
-                    or ''
+                    getattr(msg, 'reasoning_content', None) or getattr(msg, 'reasoning', None) or ''
                 )
                 if reasoning:
                     result = reasoning
@@ -211,17 +212,13 @@ class OpenAIGenericClient(LLMClient):
                 # may produce JSON with unescaped quotes, trailing commas, or
                 # truncated content.  Fall back to json_repair to salvage the
                 # response instead of failing the entire extraction pipeline.
-                logger.warning(
-                    f'JSON parse failed ({json_err}), attempting json_repair fallback'
-                )
+                logger.warning(f'JSON parse failed ({json_err}), attempting json_repair fallback')
                 try:
                     from json_repair import repair_json
 
                     parsed = repair_json(result, return_objects=True)
                 except ImportError:
-                    logger.error(
-                        'json_repair not installed; cannot salvage malformed JSON'
-                    )
+                    logger.error('json_repair not installed; cannot salvage malformed JSON')
                     raise
 
                 if not isinstance(parsed, dict):
@@ -294,7 +291,9 @@ class OpenAIGenericClient(LLMClient):
                     # client-side timeouts.
                     last_error = e
                     if retry_count >= self.MAX_RETRIES:
-                        logger.error(f'Max retries ({self.MAX_RETRIES}) exceeded on timeout/connection error: {e}')
+                        logger.error(
+                            f'Max retries ({self.MAX_RETRIES}) exceeded on timeout/connection error: {e}'
+                        )
                         span.set_status('error', str(e))
                         span.record_exception(e)
                         raise

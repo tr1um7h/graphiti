@@ -1,0 +1,7 @@
+[storage]
+type = "File"
+data_dir = "/tmp/greptimedb/data"
+
+[wal]
+dir = "/tmp/greptimedb/wal"
+file_size = "256MB"

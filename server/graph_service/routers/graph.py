@@ -58,6 +58,7 @@ _EDGE_TABLES = [
 
 class CloneGroupRequest(BaseModel):
     """Request body for group clone endpoint."""
+
     new_group_id: str
 
 
@@ -69,6 +70,7 @@ def _graph_endpoint(func: Callable) -> Callable:
     Non-Response return values are serialized via JSONResponse with a
     ``default=str`` fallback for complex types (numpy arrays, UUIDs, etc.).
     """
+
     @functools.wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         try:
@@ -80,9 +82,11 @@ def _graph_endpoint(func: Callable) -> Callable:
             raise
         except Exception as e:
             import traceback
+
             print(f'Error in {func.__name__}: {e}', flush=True)
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=str(e)) from None
+
     return wrapper
 
 
@@ -95,55 +99,55 @@ def _get_schema(driver: Any) -> str:
 async def get_graph_stats(graphiti: ZepGraphitiDep):
     """
     Get graph statistics.
-    
+
     Returns counts of nodes, edges, documents, and conversations,
     including today's new additions.
     """
     try:
         driver = graphiti.driver
         today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        
+
         # 使用 SQL 查询（AGE 底层是 SQL 表）
         # Get all entity nodes
         nodes_result, _, _ = await driver.execute_query(
-            "SELECT COUNT(*) as count FROM entity_nodes"
+            'SELECT COUNT(*) as count FROM entity_nodes'
         )
         total_nodes = nodes_result[0]['count'] if nodes_result else 0
-        
+
         # Get all entity edges
         edges_result, _, _ = await driver.execute_query(
-            "SELECT COUNT(*) as count FROM entity_edges"
+            'SELECT COUNT(*) as count FROM entity_edges'
         )
         total_edges = edges_result[0]['count'] if edges_result else 0
-        
+
         # Get documents (EpisodicNode with source='text' or 'message')
         docs_result, _, _ = await driver.execute_query(
             "SELECT COUNT(*) as count FROM episodic_nodes WHERE source IN ('text', 'message')"
         )
         total_documents = docs_result[0]['count'] if docs_result else 0
-        
+
         # Get conversations (subset of EpisodicNode)
         total_conversations = total_documents
-        
+
         # Calculate today's additions
         today_nodes, _, _ = await driver.execute_query(
-            "SELECT COUNT(*) as count FROM entity_nodes WHERE created_at >= %s",
-            params=(today_start,)
+            'SELECT COUNT(*) as count FROM entity_nodes WHERE created_at >= %s',
+            params=(today_start,),
         )
         today_new_nodes = today_nodes[0]['count'] if today_nodes else 0
-        
+
         today_edges, _, _ = await driver.execute_query(
-            "SELECT COUNT(*) as count FROM entity_edges WHERE created_at >= %s",
-            params=(today_start,)
+            'SELECT COUNT(*) as count FROM entity_edges WHERE created_at >= %s',
+            params=(today_start,),
         )
         today_new_edges = today_edges[0]['count'] if today_edges else 0
-        
+
         today_docs, _, _ = await driver.execute_query(
             "SELECT COUNT(*) as count FROM episodic_nodes WHERE source IN ('text', 'message') AND created_at >= %s",
-            params=(today_start,)
+            params=(today_start,),
         )
         today_new_documents = today_docs[0]['count'] if today_docs else 0
-        
+
         return GraphStatsResponse(
             totalNodes=total_nodes,
             totalEdges=total_edges,
@@ -156,6 +160,7 @@ async def get_graph_stats(graphiti: ZepGraphitiDep):
         )
     except Exception as e:
         import traceback
+
         print(f'❌ Error in get_graph_stats: {e}', flush=True)
         traceback.print_exc()
         return GraphStatsResponse()
@@ -165,12 +170,12 @@ async def get_graph_stats(graphiti: ZepGraphitiDep):
 async def get_graph_groups(graphiti: ZepGraphitiDep):
     """
     Get all available group IDs.
-    
+
     Returns list of group IDs with node counts.
     """
     try:
         driver = graphiti.driver
-        
+
         results, _, _ = await driver.execute_query(
             """
             SELECT group_id, COUNT(*) as count
@@ -179,19 +184,22 @@ async def get_graph_groups(graphiti: ZepGraphitiDep):
             ORDER BY count DESC
             """
         )
-        
+
         groups = []
         for record in results or []:
-            groups.append({
-                'id': record.get('group_id', ''),
-                'name': record.get('group_id', ''),
-                'count': record.get('count', 0)
-            })
-        
+            groups.append(
+                {
+                    'id': record.get('group_id', ''),
+                    'name': record.get('group_id', ''),
+                    'count': record.get('count', 0),
+                }
+            )
+
         return groups
     except Exception as e:
         print(f'❌ Error in get_graph_groups: {e}', flush=True)
         import traceback
+
         traceback.print_exc()
         return []
 
@@ -200,20 +208,20 @@ async def get_graph_groups(graphiti: ZepGraphitiDep):
 async def query_graph(request: GraphQueryRequest, graphiti: ZepGraphitiDep):
     """
     Query graph data for visualization.
-    
+
     Returns nodes and edges for graph visualization.
     """
     try:
         driver = graphiti.driver
-        
+
         # Query nodes - 使用 SQL
         group_filter = ''
         params: dict = {'limit': request.limit}
-        
+
         if request.group_ids:
             group_filter = 'AND group_id = ANY(%(group_ids)s)'
             params['group_ids'] = request.group_ids
-        
+
         nodes_result, _, _ = await driver.execute_query(
             f"""
             SELECT uuid, name, labels, summary, attributes
@@ -221,27 +229,29 @@ async def query_graph(request: GraphQueryRequest, graphiti: ZepGraphitiDep):
             WHERE 1=1 {group_filter}
             LIMIT %(limit)s
             """,
-            params=params
+            params=params,
         )
-        
+
         nodes = []
         for record in nodes_result or []:
             labels = record.get('labels', [])
             if isinstance(labels, str):
                 labels = [labels] if labels else []
-            
-            nodes.append({
-                'id': record.get('uuid', ''),
-                'name': record.get('name', ''),
-                'labels': labels,
-                'summary': record.get('summary', ''),
-                'attributes': record.get('attributes', {}) or {}
-            })
-        
+
+            nodes.append(
+                {
+                    'id': record.get('uuid', ''),
+                    'name': record.get('name', ''),
+                    'labels': labels,
+                    'summary': record.get('summary', ''),
+                    'attributes': record.get('attributes', {}) or {},
+                }
+            )
+
         # Query edges
         node_uuids = [n['id'] for n in nodes]
         edges = []
-        
+
         if node_uuids:
             edges_result, _, _ = await driver.execute_query(
                 """
@@ -252,22 +262,25 @@ async def query_graph(request: GraphQueryRequest, graphiti: ZepGraphitiDep):
                    OR e.target_node_uuid = ANY(%(node_uuids)s)
                 LIMIT 2000
                 """,
-                params={'node_uuids': node_uuids}
+                params={'node_uuids': node_uuids},
             )
-            
+
             for record in edges_result or []:
-                edges.append({
-                    'id': record.get('uuid', ''),
-                    'source_node_uuid': record.get('source_node_uuid', ''),
-                    'target_node_uuid': record.get('target_node_uuid', ''),
-                    'name': record.get('name', ''),
-                    'fact': record.get('fact', ''),
-                    'created_at': record.get('created_at', datetime.now(timezone.utc))
-                })
-        
+                edges.append(
+                    {
+                        'id': record.get('uuid', ''),
+                        'source_node_uuid': record.get('source_node_uuid', ''),
+                        'target_node_uuid': record.get('target_node_uuid', ''),
+                        'name': record.get('name', ''),
+                        'fact': record.get('fact', ''),
+                        'created_at': record.get('created_at', datetime.now(timezone.utc)),
+                    }
+                )
+
         return GraphQueryResponse(nodes=nodes, edges=edges)
     except Exception as e:
         import traceback
+
         print(f'❌ Error in query_graph: {e}', flush=True)
         traceback.print_exc()
         return GraphQueryResponse(nodes=[], edges=[])
@@ -277,18 +290,18 @@ async def query_graph(request: GraphQueryRequest, graphiti: ZepGraphitiDep):
 async def search_graph(q: str, graphiti: ZepGraphitiDep):
     """
     Search for entities in the graph by name.
-    
+
     Returns matching entities based on name matching.
     """
     if not q:
         return []
-    
+
     try:
         # 直接搜索节点，而不是边
         # 使用 SQL LIKE 查询模糊匹配节点名称
         pattern = f'%{q}%'
         print(f'🔍 Searching nodes with pattern: {pattern}', flush=True)
-        
+
         results, _, _ = await graphiti.driver.execute_query(
             """
             SELECT uuid, name, labels, summary, attributes
@@ -296,28 +309,31 @@ async def search_graph(q: str, graphiti: ZepGraphitiDep):
             WHERE name ILIKE %s
             LIMIT 20
             """,
-            params=(pattern,)
+            params=(pattern,),
         )
-        
+
         print(f'📊 Found {len(results or [])} nodes', flush=True)
-        
+
         # 转换为前端期望的格式
         entities = []
         for record in results or []:
             labels = record.get('labels', [])
             if isinstance(labels, str):
                 labels = [labels] if labels else []
-            
-            entities.append({
-                'id': record.get('uuid', ''),
-                'name': record.get('name', ''),
-                'type': labels[0] if labels else 'Entity'
-            })
-        
+
+            entities.append(
+                {
+                    'id': record.get('uuid', ''),
+                    'name': record.get('name', ''),
+                    'type': labels[0] if labels else 'Entity',
+                }
+            )
+
         return entities
     except Exception as e:
         print(f'❌ Error in search_graph: {e}', flush=True)
         import traceback
+
         traceback.print_exc()
         return []
 
@@ -326,20 +342,20 @@ async def search_graph(q: str, graphiti: ZepGraphitiDep):
 async def get_graph_schema(graphiti: ZepGraphitiDep):
     """
     Get graph schema information.
-    
+
     Returns node labels and relationship types with their counts.
     """
     try:
         driver = graphiti.driver
-        
+
         # Query node count
         nodes_result, _, _ = await driver.execute_query(
-            "SELECT COUNT(*) as count FROM entity_nodes"
+            'SELECT COUNT(*) as count FROM entity_nodes'
         )
         total_nodes = nodes_result[0]['count'] if nodes_result else 0
-        
+
         node_labels = [SchemaNodeLabel(label='Entity', count=total_nodes)]
-        
+
         # Query relationship types
         edges_result, _, _ = await driver.execute_query(
             """
@@ -349,22 +365,19 @@ async def get_graph_schema(graphiti: ZepGraphitiDep):
             ORDER BY count DESC
             """
         )
-        
+
         relationship_types = []
         for record in edges_result or []:
             relationship_types.append(
                 SchemaRelationshipType(
-                    type=record.get('type', 'UNKNOWN'),
-                    count=record.get('count', 0)
+                    type=record.get('type', 'UNKNOWN'), count=record.get('count', 0)
                 )
             )
-        
-        return GraphSchemaResponse(
-            nodeLabels=node_labels,
-            relationshipTypes=relationship_types
-        )
+
+        return GraphSchemaResponse(nodeLabels=node_labels, relationshipTypes=relationship_types)
     except Exception as e:
         import traceback
+
         print(f'❌ Error in get_graph_schema: {e}', flush=True)
         traceback.print_exc()
         return GraphSchemaResponse(nodeLabels=[], relationshipTypes=[])
@@ -374,12 +387,12 @@ async def get_graph_schema(graphiti: ZepGraphitiDep):
 async def get_graph_timeline(graphiti: ZepGraphitiDep, limit: int = 20):
     """
     Get recent activity timeline.
-    
+
     Returns recent episodes and their associated activities.
     """
     try:
         driver = graphiti.driver
-        
+
         # Get recent episodes - 使用 SQL
         episodes_result, _, _ = await driver.execute_query(
             """
@@ -389,44 +402,42 @@ async def get_graph_timeline(graphiti: ZepGraphitiDep, limit: int = 20):
             ORDER BY created_at DESC
             LIMIT %s
             """,
-            params=(limit,)
+            params=(limit,),
         )
-        
+
         timeline = []
         for record in episodes_result or []:
             source = record.get('source', 'text')
             entity_edges = record.get('entity_edges', [])
             if isinstance(entity_edges, str):
                 entity_edges = [entity_edges] if entity_edges else []
-            
+
             # Determine activity type and description
             if source in ['text', 'message']:
                 activity_type = 'document' if source == 'text' else 'episode'
-                description = f"{record.get('name', 'Untitled')} ({len(entity_edges)} edges)"
+                description = f'{record.get("name", "Untitled")} ({len(entity_edges)} edges)'
                 source_info = record.get('source_description', '')
             else:
                 activity_type = 'episode'
                 description = record.get('name', 'Untitled')
                 source_info = record.get('source_description', '')
-            
+
             created_at = record.get('created_at', datetime.now(timezone.utc))
             if isinstance(created_at, str):
                 time_str = created_at
             else:
                 time_str = created_at.isoformat()
-            
+
             timeline.append(
                 TimelineItem(
-                    type=activity_type,
-                    description=description,
-                    source=source_info,
-                    time=time_str
+                    type=activity_type, description=description, source=source_info, time=time_str
                 )
             )
-        
+
         return timeline
     except Exception as e:
         import traceback
+
         print(f'❌ Error in get_graph_timeline: {e}', flush=True)
         traceback.print_exc()
         return []
@@ -458,7 +469,7 @@ async def clone_group(
 
     # 1. Verify source group exists
     check_result, _, _ = await driver.execute_query(
-        f"SELECT COUNT(*) as count FROM {schema}.entity_nodes WHERE group_id = %(group_id)s",
+        f'SELECT COUNT(*) as count FROM {schema}.entity_nodes WHERE group_id = %(group_id)s',
         params={'group_id': group_id},
     )
     if not check_result or check_result[0].get('count', 0) == 0:
@@ -466,7 +477,7 @@ async def clone_group(
 
     # 2. Check target group doesn't already exist
     target_check, _, _ = await driver.execute_query(
-        f"SELECT COUNT(*) as count FROM {schema}.entity_nodes WHERE group_id = %(group_id)s",
+        f'SELECT COUNT(*) as count FROM {schema}.entity_nodes WHERE group_id = %(group_id)s',
         params={'group_id': new_group_id},
     )
     if target_check and target_check[0].get('count', 0) > 0:
@@ -491,7 +502,7 @@ async def clone_group(
     # 4. Copy node tables in dependency order
     for table_name in _NODE_TABLES:
         rows, _, _ = await driver.execute_query(
-            f"SELECT * FROM {schema}.{table_name} WHERE group_id = %(group_id)s ORDER BY uuid",
+            f'SELECT * FROM {schema}.{table_name} WHERE group_id = %(group_id)s ORDER BY uuid',
             params={'group_id': group_id},
         )
         if not rows:
@@ -521,14 +532,14 @@ async def clone_group(
             cols_str = ', '.join(cols)
             placeholders = ', '.join(f'%({c})s' for c in cols)
             await driver.execute_query(
-                f"INSERT INTO {schema}.{table_name} ({cols_str}) VALUES ({placeholders})",
+                f'INSERT INTO {schema}.{table_name} ({cols_str}) VALUES ({placeholders})',
                 params=vals,
             )
 
     # 5. Copy edge tables, remapping source/target node UUIDs
     for table_name in _EDGE_TABLES:
         rows, _, _ = await driver.execute_query(
-            f"SELECT * FROM {schema}.{table_name} WHERE group_id = %(group_id)s ORDER BY uuid",
+            f'SELECT * FROM {schema}.{table_name} WHERE group_id = %(group_id)s ORDER BY uuid',
             params={'group_id': group_id},
         )
         if not rows:
@@ -556,7 +567,7 @@ async def clone_group(
             cols_str = ', '.join(cols)
             placeholders = ', '.join(f'%({c})s' for c in cols)
             await driver.execute_query(
-                f"INSERT INTO {schema}.{table_name} ({cols_str}) VALUES ({placeholders})",
+                f'INSERT INTO {schema}.{table_name} ({cols_str}) VALUES ({placeholders})',
                 params=vals,
             )
 
@@ -567,7 +578,7 @@ async def clone_group(
     table_counts: dict[str, int] = {}
     for table_name in _ALL_TABLES:
         count_result, _, _ = await driver.execute_query(
-            f"SELECT COUNT(*) as count FROM {schema}.{table_name} WHERE group_id = %(group_id)s",
+            f'SELECT COUNT(*) as count FROM {schema}.{table_name} WHERE group_id = %(group_id)s',
             params={'group_id': new_group_id},
         )
         table_counts[table_name] = count_result[0].get('count', 0) if count_result else 0

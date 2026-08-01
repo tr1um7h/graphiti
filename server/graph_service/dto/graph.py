@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 class GraphStatsResponse(BaseModel):
     """Response model for graph statistics"""
+
     totalNodes: int = Field(default=0, description='Total number of entity nodes')
     totalEdges: int = Field(default=0, description='Total number of entity edges')
     totalDocuments: int = Field(default=0, description='Total number of documents')
@@ -20,6 +21,7 @@ class GraphStatsResponse(BaseModel):
 
 class GraphNode(BaseModel):
     """Graph node representation"""
+
     id: str = Field(..., description='Node UUID')
     name: str = Field(..., description='Node name')
     labels: list[str] = Field(default_factory=list, description='Node labels')
@@ -29,6 +31,7 @@ class GraphNode(BaseModel):
 
 class GraphEdge(BaseModel):
     """Graph edge representation"""
+
     id: str = Field(..., description='Edge UUID')
     source_node_uuid: str = Field(..., description='Source node UUID')
     target_node_uuid: str = Field(..., description='Target node UUID')
@@ -39,6 +42,7 @@ class GraphEdge(BaseModel):
 
 class GraphQueryRequest(BaseModel):
     """Request model for graph query"""
+
     limit: int = Field(default=500, description='Maximum number of nodes to return')
     group_ids: list[str] | None = Field(default=None, description='Filter by group IDs')
     entity_types: list[str] | None = Field(default=None, description='Filter by entity types')
@@ -46,12 +50,14 @@ class GraphQueryRequest(BaseModel):
 
 class GraphQueryResponse(BaseModel):
     """Response model for graph query"""
+
     nodes: list[GraphNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
 
 
 class GraphSearchResult(BaseModel):
     """Search result item"""
+
     id: str = Field(..., description='Entity UUID')
     name: str = Field(..., description='Entity name')
     type: str = Field(default='', description='Entity type/label')
@@ -59,24 +65,28 @@ class GraphSearchResult(BaseModel):
 
 class SchemaNodeLabel(BaseModel):
     """Schema node label with count"""
+
     label: str = Field(..., description='Node label')
     count: int = Field(..., description='Number of nodes with this label')
 
 
 class SchemaRelationshipType(BaseModel):
     """Schema relationship type with count"""
+
     type: str = Field(..., description='Relationship type')
     count: int = Field(..., description='Number of edges with this type')
 
 
 class GraphSchemaResponse(BaseModel):
     """Response model for graph schema"""
+
     nodeLabels: list[SchemaNodeLabel] = Field(default_factory=list)
     relationshipTypes: list[SchemaRelationshipType] = Field(default_factory=list)
 
 
 class TimelineItem(BaseModel):
     """Timeline activity item"""
+
     type: str = Field(..., description='Activity type: entity, relationship, document, episode')
     description: str = Field(..., description='Activity description')
     source: str = Field(default='', description='Source information')
@@ -85,6 +95,7 @@ class TimelineItem(BaseModel):
 
 class EntityDetailResponse(BaseModel):
     """Entity detail response"""
+
     id: str = Field(..., description='Entity UUID')
     name: str = Field(..., description='Entity name')
     labels: list[str] = Field(default_factory=list, description='Entity labels')
@@ -96,6 +107,7 @@ class EntityDetailResponse(BaseModel):
 
 class NeighborsResponse(BaseModel):
     """Entity neighbors response"""
+
     center: GraphNode | None = Field(default=None, description='Center entity')
     nodes: list[GraphNode] = Field(default_factory=list, description='Neighbor nodes')
     edges: list[GraphEdge] = Field(default_factory=list, description='Connecting edges')

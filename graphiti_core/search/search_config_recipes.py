@@ -43,7 +43,7 @@ COMBINED_HYBRID_SEARCH_JCHEN = SearchConfig(
             EdgeSearchMethod.bfs,
         ],
         reranker=EdgeReranker.mmr,
-    )
+    ),
 )
 
 # Performs a hybrid search with rrf reranking over edges, nodes, and communities

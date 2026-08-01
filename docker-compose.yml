@@ -52,12 +52,18 @@ services:
       # 服务配置
       - PORT=8000
       - DATABASE_PROVIDER=postgres_age
-      # 禁用遥测
-      - GRAPHITI_TELEMETRY_ENABLED=${GRAPHITI_TELEMETRY_ENABLED:-false}
+      # 可观测性 — OTel trace 导出到 collector
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      - OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-graphiti-server}
+      - OTEL_SERVICE_VERSION=${OTEL_SERVICE_VERSION:-dev}
+      - DEPLOYMENT_ENVIRONMENT=${DEPLOYMENT_ENVIRONMENT:-development}
       # Chat 搜索参数
       - CHAT_SIM_MIN_SCORE=${CHAT_SIM_MIN_SCORE:-0.2}
       - CHAT_SEARCH_LIMIT=${CHAT_SEARCH_LIMIT:-10}
       - CHAT_BFS_MAX_DEPTH=${CHAT_BFS_MAX_DEPTH:-3}
+    networks:
+      - default
+      - observability
 
   # Graphiti MCP Server
   mcp-server:
@@ -85,7 +91,6 @@ services:
       - USE_GENERIC_CLIENT=${USE_GENERIC_CLIENT:-true}
       - OPENAI_MAX_TOKENS=${OPENAI_MAX_TOKENS:-16384}
       - LLM_TIMEOUT=${LLM_TIMEOUT:-600}
-      - GRAPHITI_TELEMETRY_ENABLED=${GRAPHITI_TELEMETRY_ENABLED:-false}
       # Embedding — 使用外部 embedding-service
       - EMBEDDER_PROVIDER=${EMBEDDER_PROVIDER:-openai}
       - EMBEDDING_API_URL=${EMBEDDING_API_URL:-http://host.docker.internal:8080/v1}
@@ -130,6 +135,63 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+  # ===== OpenTelemetry Collector =====
+  otel-collector:
+    profiles: ["observability", "all"]
+    image: otel/opentelemetry-collector-contrib:0.104.0
+    container_name: graphiti-otel-collector
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./observability/otel-config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+    depends_on:
+      - greptime
+    networks:
+      - observability
+    restart: unless-stopped
+
+  # ===== GreptimeDB (traces + metrics + logs 统一存储) =====
+  greptime:
+    profiles: ["observability", "all"]
+    image: greptime/greptimedb:v1.1.0
+    container_name: graphiti-greptime
+    command: ["standalone", "start", "--http-addr=0.0.0.0:4000", "--grpc-bind-addr=0.0.0.0:4001"]
+    volumes:
+      - greptime-data:/tmp/greptimedb
+    ports:
+      - "4000:4000"
+      - "4002:4002"
+      - "4001:4001"
+    networks:
+      - observability
+    restart: unless-stopped
+
+  # ===== Grafana =====
+  grafana:
+    profiles: ["observability", "all"]
+    image: grafana/grafana:11.1.0
+    container_name: graphiti-grafana
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - ./observability/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./observability/grafana-datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3001:3000"
+    depends_on:
+      - greptime
+    networks:
+      - observability
+    restart: unless-stopped
 
 volumes:
   mcp_logs:
+  greptime-data:
+  profiling-data:
+
+networks:
+  observability:
