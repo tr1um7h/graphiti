@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from graph_service.config import get_settings
+from graph_service.logs import setup_logging
+from graph_service.observability import setup_metrics, setup_tracing
 from graph_service.middleware import TracingMiddleware
 from graph_service.routers import chat, entities, graph, ingest, retrieve, schemas
 from graph_service.zep_graphiti import initialize_graphiti
@@ -11,6 +13,11 @@ from graph_service.zep_graphiti import initialize_graphiti
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Initialize observability
+    setup_logging(level='INFO')
+    setup_tracing()
+    setup_metrics()
+
     settings = get_settings()
     await initialize_graphiti(settings)
     # Ensure extraction_schemas table exists

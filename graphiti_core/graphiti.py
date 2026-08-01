@@ -74,6 +74,13 @@ from graphiti_core.search.search_utils import (
     get_mentioned_nodes,
 )
 from graphiti_core.tracer import Tracer, create_tracer
+from graphiti_core.observability.metrics import (
+    create_episode_add_counter,
+    create_episode_add_duration,
+    create_search_counter,
+    create_search_duration,
+    create_search_result_count,
+)
 from graphiti_core.utils.bulk_utils import (
     RawEpisode,
     add_nodes_and_edges_bulk,
@@ -269,6 +276,16 @@ class Graphiti:
 
         # Initialize tracer
         self.tracer = create_tracer(tracer, trace_span_prefix)
+
+        # Initialize metrics
+        from opentelemetry import metrics
+
+        meter = metrics.get_meter('graphiti-core')
+        self._episode_add_counter = create_episode_add_counter(meter)
+        self._episode_add_duration = create_episode_add_duration(meter)
+        self._search_counter = create_search_counter(meter)
+        self._search_duration = create_search_duration(meter)
+        self._search_result_count = create_search_result_count(meter)
 
         # Set tracer on clients
         self.llm_client.set_tracer(self.tracer)
@@ -1207,6 +1224,11 @@ class Graphiti:
 
                 logger.info(f'Completed add_episode in {(end - start) * 1000} ms')
 
+                # Record metrics
+                duration_ms = (end - start) * 1000
+                self._episode_add_counter.add(1, {'source': source.value})
+                self._episode_add_duration.record(duration_ms, {'source': source.value})
+
                 return AddEpisodeResults(
                     episode=episode,
                     episodic_edges=episodic_edges,
@@ -1794,6 +1816,7 @@ class Graphiti:
         point for temporal relevance.
         """
         with self.tracer.start_span('search') as span:
+            start_time = time()
             span.add_attributes(
                 {
                     'search.type': 'node_distance' if center_node_uuid else 'hybrid',
@@ -1818,6 +1841,13 @@ class Graphiti:
                     center_node_uuid=center_node_uuid,
                 )
             ).edges
+
+            # Record metrics
+            duration_ms = (time() - start_time) * 1000
+            search_type = 'node_distance' if center_node_uuid else 'hybrid'
+            self._search_counter.add(1, {'type': search_type})
+            self._search_duration.record(duration_ms, {'type': search_type})
+            self._search_result_count.record(len(edges), {'type': search_type})
 
             return edges
 

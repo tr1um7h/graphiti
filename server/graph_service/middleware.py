@@ -9,6 +9,7 @@ and baggage in the same context as the route handler.
 
 import contextlib
 import logging
+import time
 
 try:
     from opentelemetry import baggage, context, trace
@@ -48,6 +49,7 @@ class TracingMiddleware:
 
         method = scope.get('method', 'UNKNOWN')
         route = scope.get('path', 'UNKNOWN')
+        start_time = time.time()
 
         try:
             with self.tracer.start_as_current_span(
@@ -70,6 +72,12 @@ class TracingMiddleware:
                     span.set_attribute('http.status_code', status_code['value'])
                     if status_code['value'] >= 500:
                         span.set_status(StatusCode.ERROR)
+
+                    # Record API metrics
+                    from graph_service.observability import record_api_request
+
+                    duration_ms = (time.time() - start_time) * 1000
+                    record_api_request(method, route, status_code['value'], duration_ms)
         finally:
             context.detach(token)
 
