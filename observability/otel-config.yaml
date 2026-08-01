@@ -27,7 +27,7 @@ processors:
       - name: baseline
         type: probabilistic
         probabilistic:
-          sampling_percentage: 10
+          sampling_percentage: ${OTEL_TRACE_SAMPLING_PERCENTAGE:-100}
 
   attributes/sanitize:
     actions:

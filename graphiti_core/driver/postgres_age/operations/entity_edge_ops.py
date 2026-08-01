@@ -112,6 +112,7 @@ class PostgresAgeEntityEdgeOperations(EntityEdgeOperations):
             'SELECT * FROM entity_edges WHERE uuid = %(uuid)s',
             params={'uuid': uuid},
             routing_='r',
+        query_name='get_by_uuid',
         )
         if not records:
             raise EdgeNotFoundError(uuid)
@@ -133,6 +134,7 @@ class PostgresAgeEntityEdgeOperations(EntityEdgeOperations):
             """,
             params={'uuids': uuids},
             routing_='r',
+        query_name='get_by_uuids',
         )
         return [entity_edge_from_row(row) for row in records]
 
@@ -155,6 +157,7 @@ class PostgresAgeEntityEdgeOperations(EntityEdgeOperations):
             """,
             params={'group_ids': group_ids, 'uuid_cursor': uuid_cursor, 'limit': limit},
             routing_='r',
+        query_name='get_by_group_ids',
         )
         return [entity_edge_from_row(row) for row in records]
 
@@ -177,6 +180,7 @@ class PostgresAgeEntityEdgeOperations(EntityEdgeOperations):
                 'target_node_uuid': target_node_uuid,
             },
             routing_='r',
+        query_name='get_between_nodes',
         )
         return [entity_edge_from_row(row) for row in records]
 
@@ -195,6 +199,7 @@ class PostgresAgeEntityEdgeOperations(EntityEdgeOperations):
             """,
             params={'node_uuid': node_uuid},
             routing_='r',
+        query_name='get_by_node_uuid',
         )
         return [entity_edge_from_row(row) for row in records]
 
@@ -207,6 +212,7 @@ class PostgresAgeEntityEdgeOperations(EntityEdgeOperations):
             'SELECT fact_embedding FROM entity_edges WHERE uuid = %(uuid)s',
             params={'uuid': edge.uuid},
             routing_='r',
+        query_name='load_embeddings',
         )
         if not records:
             raise EdgeNotFoundError(edge.uuid)
@@ -227,6 +233,7 @@ class PostgresAgeEntityEdgeOperations(EntityEdgeOperations):
             'SELECT uuid, fact_embedding FROM entity_edges WHERE uuid = ANY(%(uuids)s)',
             params={'uuids': uuids},
             routing_='r',
+        query_name='load_embeddings_bulk',
         )
         embeddings = {row['uuid']: row['fact_embedding'] for row in records}
         for edge in edges:

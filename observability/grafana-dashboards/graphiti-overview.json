@@ -1,85 +1,91 @@
 {
-  "title": "Graphiti Overview",
+  "title": "Graphiti Observability",
   "uid": "graphiti-overview",
   "schemaVersion": 39,
-  "version": 2,
+  "version": 4,
   "refresh": "10s",
-  "time": {
-    "from": "now-1h",
-    "to": "now"
-  },
+  "time": { "from": "now-1h", "to": "now" },
   "panels": [
     {
       "type": "stat",
-      "title": "Spans (1h)",
+      "title": "Add Episode",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
-      "targets": [
-        {
-          "expr": "SELECT count(*) AS value FROM opentelemetry_traces WHERE timestamp > now() - INTERVAL '1h'",
-          "refId": "A",
-          "format": "table"
-        }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] }
-      }
+      "datasource": { "type": "mysql", "uid": "greptimedb" },
+      "targets": [{
+        "refId": "A",
+        "format": "table",
+        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.add_episode' AND timestamp > now() - INTERVAL '1' HOUR"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
     },
     {
       "type": "stat",
-      "title": "HTTP Requests (1h)",
+      "title": "Search",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
-      "targets": [
-        {
-          "expr": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'http.server.request' AND timestamp > now() - INTERVAL '1h'",
-          "refId": "A",
-          "format": "table"
-        }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] }
-      }
+      "datasource": { "type": "mysql", "uid": "greptimedb" },
+      "targets": [{
+        "refId": "A",
+        "format": "table",
+        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.search' AND timestamp > now() - INTERVAL '1' HOUR"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
     },
     {
       "type": "stat",
-      "title": "Error Spans (1h)",
+      "title": "LLM Calls",
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
-      "targets": [
-        {
-          "expr": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_status_code = 'STATUS_CODE_ERROR' AND timestamp > now() - INTERVAL '1h'",
-          "refId": "A",
-          "format": "table"
-        }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] }
-      }
+      "datasource": { "type": "mysql", "uid": "greptimedb" },
+      "targets": [{
+        "refId": "A",
+        "format": "table",
+        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.llm.generate' AND timestamp > now() - INTERVAL '1' HOUR"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
     },
     {
       "type": "stat",
-      "title": "Services (1h)",
+      "title": "DB Queries",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
-      "targets": [
-        {
-          "expr": "SELECT count(DISTINCT service_name) AS value FROM opentelemetry_traces WHERE timestamp > now() - INTERVAL '1h'",
-          "refId": "A",
-          "format": "table"
-        }
-      ],
-      "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] }
-      }
+      "datasource": { "type": "mysql", "uid": "greptimedb" },
+      "targets": [{
+        "refId": "A",
+        "format": "table",
+        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.db.query' AND timestamp > now() - INTERVAL '1' HOUR"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
     },
     {
       "type": "table",
-      "title": "Recent Traces",
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 4 },
-      "targets": [
-        {
-          "expr": "SELECT trace_id, span_name, service_name, span_status_code, duration_nano / 1000000 AS duration_ms, timestamp FROM opentelemetry_traces ORDER BY timestamp DESC LIMIT 50",
-          "refId": "A",
-          "format": "table"
-        }
-      ]
+      "title": "Add Episode - Recent",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
+      "datasource": { "type": "mysql", "uid": "greptimedb" },
+      "targets": [{
+        "refId": "A",
+        "format": "table",
+        "rawSql": "SELECT trace_id, span_name, duration_nano/1000000 AS duration_ms, span_status_code, timestamp FROM opentelemetry_traces WHERE span_name LIKE 'graphiti.%' ORDER BY timestamp DESC LIMIT 30"
+      }]
+    },
+    {
+      "type": "table",
+      "title": "Span Call Counts (1h)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "mysql", "uid": "greptimedb" },
+      "targets": [{
+        "refId": "A",
+        "format": "table",
+        "rawSql": "SELECT span_name, count(*) AS calls, round(avg(duration_nano)/1000000, 1) AS avg_ms, round(max(duration_nano)/1000000, 1) AS max_ms FROM opentelemetry_traces WHERE timestamp > now() - INTERVAL '1' HOUR GROUP BY span_name ORDER BY calls DESC LIMIT 20"
+      }]
+    },
+    {
+      "type": "table",
+      "title": "All Recent Traces",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "mysql", "uid": "greptimedb" },
+      "targets": [{
+        "refId": "A",
+        "format": "table",
+        "rawSql": "SELECT trace_id, span_name, service_name, duration_nano/1000000 AS duration_ms, span_status_code, timestamp FROM opentelemetry_traces ORDER BY timestamp DESC LIMIT 30"
+      }]
     }
   ]
 }

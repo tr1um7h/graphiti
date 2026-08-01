@@ -34,7 +34,9 @@ async def run_statement(
     if tx is not None:
         await tx.run(query, params=params)
     else:
-        await executor.execute_query(query, params=params, query_type='write')
+        await executor.execute_query(
+            query, params=params, query_type='write', query_name='run_statement'
+        )
 
 
 async def fetch_records(
@@ -47,7 +49,11 @@ async def fetch_records(
         records, _, _ = await tx.run(query, params=params)
     else:
         records, _, _ = await executor.execute_query(
-            query, params=params, query_type='read', routing_='r'
+            query,
+            params=params,
+            query_type='read',
+            query_name='fetch_records',
+            routing_='r',
         )
     return records
 
@@ -65,7 +71,9 @@ async def run_age_cypher(
     if tx is not None:
         await tx.run(query, params=None)
     else:
-        await executor.execute_query(query, params=None, query_type='write')
+        await executor.execute_query(
+            query, params=None, query_type='write', query_name='run_age_cypher'
+        )
 
 
 async def delete_node_projection(

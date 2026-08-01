@@ -105,6 +105,7 @@ class PostgresAgeSimpleEdgeOperations(Generic[SimpleEdge]):
             f'SELECT * FROM {self.table_name} WHERE uuid = %(uuid)s',
             params={'uuid': uuid},
             routing_='r',
+        query_name='get_by_uuid',
         )
         if not records:
             raise EdgeNotFoundError(uuid)
@@ -126,6 +127,7 @@ class PostgresAgeSimpleEdgeOperations(Generic[SimpleEdge]):
             """,
             params={'uuids': uuids},
             routing_='r',
+        query_name='get_by_uuids',
         )
         return [self.edge_from_row(row) for row in records]
 
@@ -148,6 +150,7 @@ class PostgresAgeSimpleEdgeOperations(Generic[SimpleEdge]):
             """,
             params={'group_ids': group_ids, 'uuid_cursor': uuid_cursor, 'limit': limit},
             routing_='r',
+        query_name='get_by_group_ids',
         )
         return [self.edge_from_row(row) for row in records]
 

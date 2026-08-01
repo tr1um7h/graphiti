@@ -124,6 +124,7 @@ class PostgresAgeSagaNodeOperations(SagaNodeOperations):
             'SELECT * FROM saga_nodes WHERE uuid = %(uuid)s',
             params={'uuid': uuid},
             routing_='r',
+        query_name='get_by_uuid',
         )
         if not records:
             raise NodeNotFoundError(uuid)
@@ -145,6 +146,7 @@ class PostgresAgeSagaNodeOperations(SagaNodeOperations):
             """,
             params={'uuids': uuids},
             routing_='r',
+        query_name='get_by_uuids',
         )
         return [saga_node_from_row(row) for row in records]
 
@@ -167,6 +169,7 @@ class PostgresAgeSagaNodeOperations(SagaNodeOperations):
             """,
             params={'group_ids': group_ids, 'uuid_cursor': uuid_cursor, 'limit': limit},
             routing_='r',
+        query_name='get_by_group_ids',
         )
         return [saga_node_from_row(row) for row in records]
 
@@ -188,6 +191,7 @@ class PostgresAgeSagaNodeOperations(SagaNodeOperations):
             """,
             params={'saga_uuid': saga_uuid, 'current_episode_uuid': current_episode_uuid},
             routing_='r',
+        query_name='get_previous_episode_uuid',
         )
         if not records:
             return None
@@ -216,5 +220,6 @@ class PostgresAgeSagaNodeOperations(SagaNodeOperations):
             """,
             params={'saga_uuid': saga_uuid, 'since': since, 'limit': limit},
             routing_='r',
+        query_name='get_episode_contents',
         )
         return [(row['content'], row['valid_at']) for row in records]

@@ -129,6 +129,7 @@ class PostgresAgeEntityNodeOperations(EntityNodeOperations):
             'SELECT * FROM entity_nodes WHERE uuid = %(uuid)s',
             params={'uuid': uuid},
             routing_='r',
+        query_name='get_by_uuid',
         )
         if not records:
             raise NodeNotFoundError(uuid)
@@ -150,6 +151,7 @@ class PostgresAgeEntityNodeOperations(EntityNodeOperations):
             """,
             params={'uuids': uuids},
             routing_='r',
+        query_name='get_by_uuids',
         )
         return [entity_node_from_row(row) for row in records]
 
@@ -177,6 +179,7 @@ class PostgresAgeEntityNodeOperations(EntityNodeOperations):
             """,
             params=params,
             routing_='r',
+        query_name='get_by_group_ids',
         )
         return [entity_node_from_row(row) for row in records]
 
@@ -189,6 +192,7 @@ class PostgresAgeEntityNodeOperations(EntityNodeOperations):
             'SELECT name_embedding FROM entity_nodes WHERE uuid = %(uuid)s',
             params={'uuid': node.uuid},
             routing_='r',
+        query_name='load_embeddings',
         )
         if not records:
             raise NodeNotFoundError(node.uuid)
@@ -209,6 +213,7 @@ class PostgresAgeEntityNodeOperations(EntityNodeOperations):
             'SELECT uuid, name_embedding FROM entity_nodes WHERE uuid = ANY(%(uuids)s)',
             params={'uuids': uuids},
             routing_='r',
+        query_name='load_embeddings_bulk',
         )
         embeddings = {row['uuid']: row['name_embedding'] for row in records}
         for node in nodes:

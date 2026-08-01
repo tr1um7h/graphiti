@@ -124,13 +124,36 @@ class PostgresAgeDriver(GraphDriver):
         )
 
     async def execute_query(
-        self, cypher_query_: Any, *, query_type: str | None = None, **kwargs: Any
+        self,
+        cypher_query_: Any,
+        *,
+        query_type: str | None = None,
+        query_name: str | None = None,
+        **kwargs: Any,
     ) -> PostgresAgeResult:
         """Execute SQL directly; later AGE Cypher helpers will wrap graph queries."""
         await self._ensure_open()
         params = _query_params(kwargs.pop('params', None), kwargs)
 
-        with self.tracer.start_span('db.query') as span:
+        # If no explicit query_name was provided, infer it from the caller
+        # function so every db.query span is identifiable in traces.
+        if query_name is None:
+            import inspect
+
+            frame = inspect.currentframe()
+            try:
+                caller = frame.f_back if frame is not None else None
+                query_name = caller.f_code.co_name if caller is not None else 'execute_query'
+            finally:
+                del frame
+
+        span_parts = ['db.query']
+        if query_type:
+            span_parts.append(query_type)
+        if query_name:
+            span_parts.append(query_name)
+        span_name = '.'.join(span_parts)
+        with self.tracer.start_span(span_name) as span:
             if query_type is not None:
                 span.add_attributes({'graphiti.db.query_type': query_type})
             span.add_attributes({'graphiti.db.system': 'postgres_age'})

@@ -755,6 +755,7 @@ class PostgresAgeSearchInterface(SearchInterface):
                 'min_score': min_score,
             },
             routing_='r',
+        query_name='node_distance_reranker',
         )
         return [row['uuid'] for row in records], [row['score'] for row in records]
 
@@ -786,6 +787,7 @@ class PostgresAgeSearchInterface(SearchInterface):
             """,
             params={'node_uuids': sorted_uuids, 'min_score': min_score},
             routing_='r',
+        query_name='episode_mentions_reranker',
         )
         return [row['uuid'] for row in records], [row['score'] for row in records]
 

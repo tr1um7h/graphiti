@@ -77,6 +77,7 @@ class PostgresAgeCommunityEdgeOperations(
                 query,
                 params={'target_node_uuid': target_node_uuid},
                 routing_='r',
+            query_name='_target_label',
             )
         if records and records[0]['is_community']:
             return 'Community'

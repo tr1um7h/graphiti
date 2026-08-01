@@ -141,6 +141,8 @@ services:
     image: otel/opentelemetry-collector-contrib:0.104.0
     container_name: graphiti-otel-collector
     command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      - OTEL_TRACE_SAMPLING_PERCENTAGE=${OTEL_TRACE_SAMPLING_PERCENTAGE:-100}
     volumes:
       - ./observability/otel-config.yaml:/etc/otelcol/config.yaml:ro
     ports:
@@ -157,7 +159,7 @@ services:
     profiles: ["observability", "all"]
     image: greptime/greptimedb:v1.1.0
     container_name: graphiti-greptime
-    command: ["standalone", "start", "--http-addr=0.0.0.0:4000", "--grpc-bind-addr=0.0.0.0:4001"]
+    command: ["standalone", "start", "--http-addr=0.0.0.0:4000", "--grpc-bind-addr=0.0.0.0:4001", "--mysql-addr=0.0.0.0:4002"]
     volumes:
       - greptime-data:/tmp/greptimedb
     ports:
