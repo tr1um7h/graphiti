@@ -161,79 +161,89 @@ class OpenAIGenericClient(LLMClient):
             # in a separate field so it doesn't pollute the JSON content
             request_kwargs['extra_body'] = {'reasoning_split': True}
 
-            response = await self.client.chat.completions.create(**request_kwargs)
-            msg = response.choices[0].message
+            # Sub-span: API request (network + model inference)
+            with self.tracer.start_span('llm.api_request') as api_span:
+                api_span.add_attributes({'model': self.model or DEFAULT_MODEL})
+                response = await self.client.chat.completions.create(**request_kwargs)
 
-            import re as _re
+            # Sub-span: response parsing (cleanup + JSON decode)
+            with self.tracer.start_span('llm.parse_response'):
+                msg = response.choices[0].message
 
-            # Primary content from the LLM
-            result = msg.content or ''
+                import re as _re
 
-            # If content is empty, some reasoning models (vLLM with reasoning_split)
-            # put the full response (including JSON) in reasoning_content.
-            # Qwen3 and similar models may use the 'reasoning' field instead.
-            # Try to extract JSON from there as a fallback.
-            if not result:
-                reasoning = (
-                    getattr(msg, 'reasoning_content', None) or getattr(msg, 'reasoning', None) or ''
-                )
-                if reasoning:
-                    result = reasoning
+                # Primary content from the LLM
+                result = msg.content or ''
 
-            # Strip closed <think>...</think> blocks (reasoning process)
-            result = _re.sub(r'<think>.*?</think>', '', result, flags=_re.DOTALL).strip()
+                # If content is empty, some reasoning models (vLLM with reasoning_split)
+                # put the full response (including JSON) in reasoning_content.
+                # Qwen3 and similar models may use the 'reasoning' field instead.
+                # Try to extract JSON from there as a fallback.
+                if not result:
+                    reasoning = (
+                        getattr(msg, 'reasoning_content', None)
+                        or getattr(msg, 'reasoning', None)
+                        or ''
+                    )
+                    if reasoning:
+                        result = reasoning
 
-            # Handle unclosed <think> tag: model exhausted max_tokens mid-thinking
-            if result.startswith('<think>') and '</think>' not in result:
-                raise ValueError(
-                    'LLM response contains only an unclosed <think> tag — the model '
-                    f'exhausted max_tokens ({self.max_tokens}) on reasoning before '
-                    'producing any content. Consider increasing max_tokens in config.'
-                )
+                # Strip closed <think>...</think> blocks (reasoning process)
+                result = _re.sub(r'<think>.*?</think>', '', result, flags=_re.DOTALL).strip()
 
-            # Strip markdown code blocks (```json ... ``` or ``` ... ```)
-            code_block = _re.search(r'```(?:json)?\s*\n?(.*?)```', result, _re.DOTALL)
-            if code_block:
-                result = code_block.group(1).strip()
+                # Handle unclosed <think> tag: model exhausted max_tokens mid-thinking
+                if result.startswith('<think>') and '</think>' not in result:
+                    raise ValueError(
+                        'LLM response contains only an unclosed <think> tag — the model '
+                        f'exhausted max_tokens ({self.max_tokens}) on reasoning before '
+                        'producing any content. Consider increasing max_tokens in config.'
+                    )
 
-            # Validate non-empty after cleanup
-            if not result:
-                raise ValueError(
-                    'LLM returned empty content (content=null and no usable '
-                    'reasoning_content). This may indicate the model exhausted '
-                    f'max_tokens ({self.max_tokens}) on reasoning. '
-                    'Consider increasing max_tokens in config.'
-                )
+                # Strip markdown code blocks (```json ... ``` or ``` ... ```)
+                code_block = _re.search(r'```(?:json)?\s*\n?(.*?)```', result, _re.DOTALL)
+                if code_block:
+                    result = code_block.group(1).strip()
 
-            try:
-                parsed = json.loads(result)
-            except json.JSONDecodeError as json_err:
-                # Reasoning models (deepseek-v4-flash, MiniMax-M2.7, Qwen3, etc.)
-                # may produce JSON with unescaped quotes, trailing commas, or
-                # truncated content.  Fall back to json_repair to salvage the
-                # response instead of failing the entire extraction pipeline.
-                logger.warning(f'JSON parse failed ({json_err}), attempting json_repair fallback')
+                # Validate non-empty after cleanup
+                if not result:
+                    raise ValueError(
+                        'LLM returned empty content (content=null and no usable '
+                        'reasoning_content). This may indicate the model exhausted '
+                        f'max_tokens ({self.max_tokens}) on reasoning. '
+                        'Consider increasing max_tokens in config.'
+                    )
+
                 try:
-                    from json_repair import repair_json
+                    parsed = json.loads(result)
+                except json.JSONDecodeError as json_err:
+                    # Reasoning models (deepseek-v4-flash, MiniMax-M2.7, Qwen3, etc.)
+                    # may produce JSON with unescaped quotes, trailing commas, or
+                    # truncated content.  Fall back to json_repair to salvage the
+                    # response instead of failing the entire extraction pipeline.
+                    logger.warning(
+                        f'JSON parse failed ({json_err}), attempting json_repair fallback'
+                    )
+                    try:
+                        from json_repair import repair_json
 
-                    parsed = repair_json(result, return_objects=True)
-                except ImportError:
-                    logger.error('json_repair not installed; cannot salvage malformed JSON')
-                    raise
+                        parsed = repair_json(result, return_objects=True)
+                    except ImportError:
+                        logger.error('json_repair not installed; cannot salvage malformed JSON')
+                        raise
 
-                if not isinstance(parsed, dict):
-                    raise json_err
-                logger.info('json_repair successfully salvaged LLM response')
+                    if not isinstance(parsed, dict):
+                        raise json_err
+                    logger.info('json_repair successfully salvaged LLM response')
 
-            # Detect empty JSON object — model failed to produce valid output
-            if isinstance(parsed, dict) and len(parsed) == 0:
-                raise ValueError(
-                    'LLM returned empty JSON object {}. The model may have '
-                    'exhausted tokens on reasoning or failed to understand the prompt. '
-                    f'max_tokens={self.max_tokens}.'
-                )
+                # Detect empty JSON object — model failed to produce valid output
+                if isinstance(parsed, dict) and len(parsed) == 0:
+                    raise ValueError(
+                        'LLM returned empty JSON object {}. The model may have '
+                        'exhausted tokens on reasoning or failed to understand the prompt. '
+                        f'max_tokens={self.max_tokens}.'
+                    )
 
-            return parsed
+                return parsed
         except openai.RateLimitError as e:
             raise RateLimitError from e
         except Exception as e:
