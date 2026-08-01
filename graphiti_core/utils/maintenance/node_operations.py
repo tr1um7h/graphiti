@@ -56,6 +56,7 @@ from graphiti_core.utils.text_utils import (
     concatenate_episodes,
     truncate_at_sentence,
 )
+from graphiti_core.tracer import NoOpTracer
 
 logger = logging.getLogger(__name__)
 
@@ -92,62 +93,65 @@ async def extract_nodes(
         node_episode_index_map maps node UUID to a list of 0-indexed episode
         positions that the node was extracted from.
     """
-    episodes = episode if isinstance(episode, list) else [episode]
-    primary_episode = episodes[0]
+    with clients.tracer.start_span('episode.extract_nodes'):
+        episodes = episode if isinstance(episode, list) else [episode]
+        primary_episode = episodes[0]
 
-    start = time()
-    llm_client = clients.llm_client
+        start = time()
+        llm_client = clients.llm_client
 
-    # Build entity types context
-    entity_types_context = _build_entity_types_context(entity_types)
+        # Build entity types context
+        entity_types_context = _build_entity_types_context(entity_types)
 
-    # Build episode attribution instructions for multi-episode extraction
-    episode_attribution = ''
-    if len(episodes) > 1:
-        episode_attribution = (
-            '\n7. **Episode Attribution**: The content contains multiple episodes labeled '
-            '[Episode 0], [Episode 1], etc. Each episode header includes a timestamp indicating '
-            'when that episode occurred. For each extracted entity, set `episode_indices` '
-            'to the 0-based list of episode numbers where that entity is mentioned. '
-            'An entity appearing in Episodes 0 and 2 should have `episode_indices: [0, 2]`.'
+        # Build episode attribution instructions for multi-episode extraction
+        episode_attribution = ''
+        if len(episodes) > 1:
+            episode_attribution = (
+                '\n7. **Episode Attribution**: The content contains multiple episodes labeled '
+                '[Episode 0], [Episode 1], etc. Each episode header includes a timestamp indicating '
+                'when that episode occurred. For each extracted entity, set `episode_indices` '
+                'to the 0-based list of episode numbers where that entity is mentioned. '
+                'An entity appearing in Episodes 0 and 2 should have `episode_indices: [0, 2]`.'
+            )
+
+        # Build base context
+        context = {
+            'episode_content': concatenate_episodes(episodes),
+            'episode_timestamp': primary_episode.valid_at.isoformat(),
+            'previous_episodes': [
+                {
+                    'content': ep.content,
+                    'timestamp': ep.valid_at.isoformat() if ep.valid_at else None,
+                }
+                for ep in previous_episodes
+            ],
+            'custom_extraction_instructions': (custom_extraction_instructions or '')
+            + episode_attribution,
+            'entity_types': entity_types_context,
+            'source_description': primary_episode.source_description,
+        }
+
+        # Extract entities
+        extracted_entities = await _extract_nodes_single(llm_client, primary_episode, context)
+
+        # Filter empty names
+        filtered_entities = [e for e in extracted_entities if e.name.strip()]
+
+        end = time()
+        logger.debug(
+            f'Extracted {len(filtered_entities)} entities in {(end - start) * 1000:.0f} ms'
         )
 
-    # Build base context
-    context = {
-        'episode_content': concatenate_episodes(episodes),
-        'episode_timestamp': primary_episode.valid_at.isoformat(),
-        'previous_episodes': [
-            {
-                'content': ep.content,
-                'timestamp': ep.valid_at.isoformat() if ep.valid_at else None,
-            }
-            for ep in previous_episodes
-        ],
-        'custom_extraction_instructions': (custom_extraction_instructions or '')
-        + episode_attribution,
-        'entity_types': entity_types_context,
-        'source_description': primary_episode.source_description,
-    }
+        # Convert to EntityNode objects with episode attribution
+        extracted_nodes, node_episode_index_map = _create_entity_nodes(
+            filtered_entities, entity_types_context, excluded_entity_types, episodes
+        )
+        extracted_nodes = _collapse_exact_duplicate_extracted_nodes(
+            extracted_nodes, node_episode_index_map
+        )
 
-    # Extract entities
-    extracted_entities = await _extract_nodes_single(llm_client, primary_episode, context)
-
-    # Filter empty names
-    filtered_entities = [e for e in extracted_entities if e.name.strip()]
-
-    end = time()
-    logger.debug(f'Extracted {len(filtered_entities)} entities in {(end - start) * 1000:.0f} ms')
-
-    # Convert to EntityNode objects with episode attribution
-    extracted_nodes, node_episode_index_map = _create_entity_nodes(
-        filtered_entities, entity_types_context, excluded_entity_types, episodes
-    )
-    extracted_nodes = _collapse_exact_duplicate_extracted_nodes(
-        extracted_nodes, node_episode_index_map
-    )
-
-    logger.debug(f'Extracted nodes: {[n.uuid for n in extracted_nodes]}')
-    return extracted_nodes, node_episode_index_map
+        logger.debug(f'Extracted nodes: {[n.uuid for n in extracted_nodes]}')
+        return extracted_nodes, node_episode_index_map
 
 
 def _build_entity_types_context(
@@ -736,79 +740,80 @@ async def resolve_extracted_nodes(
     existing_nodes_override: list[EntityNode] | None = None,
 ) -> tuple[list[EntityNode], dict[str, str], list[tuple[EntityNode, EntityNode]]]:
     """Resolve nodes with semantic retrieval first, then deterministic and LLM dedup."""
-    llm_client = clients.llm_client
-    candidate_nodes_by_extracted = await _collect_candidate_nodes(
-        clients,
-        extracted_nodes,
-        existing_nodes_override,
-    )
-
-    state = DedupResolutionState(
-        resolved_nodes=[None] * len(extracted_nodes),
-        uuid_map={},
-        unresolved_indices=[],
-    )
-
-    for idx, (node, candidates) in enumerate(
-        zip(extracted_nodes, candidate_nodes_by_extracted, strict=True)
-    ):
-        if not candidates:
-            continue
-
-        indexes = _build_candidate_indexes(candidates)
-        local_state = DedupResolutionState(
-            resolved_nodes=[None], uuid_map={}, unresolved_indices=[]
-        )
-        _resolve_with_similarity([node], indexes, local_state)
-        if local_state.resolved_nodes[0] is not None:
-            _commit_resolution(
-                state,
-                local_state.resolved_nodes[0],
-                local_state.uuid_map,
-                local_state.duplicate_pairs,
-                idx,
-            )
-            continue
-
-        state.unresolved_indices.append(idx)
-
-    if state.unresolved_indices:
-        llm_candidate_nodes = _merge_candidate_nodes(
-            [
-                candidate
-                for idx in state.unresolved_indices
-                for candidate in candidate_nodes_by_extracted[idx]
-            ],
-            None,
-        )
-        await _resolve_with_llm(
-            llm_client,
+    with clients.tracer.start_span('episode.resolve_nodes'):
+        llm_client = clients.llm_client
+        candidate_nodes_by_extracted = await _collect_candidate_nodes(
+            clients,
             extracted_nodes,
-            _build_candidate_indexes(llm_candidate_nodes),
-            state,
-            episode,
-            previous_episodes,
-            entity_types,
+            existing_nodes_override,
         )
 
-    if not state.unresolved_indices and not any(candidate_nodes_by_extracted):
-        logger.debug('No semantic dedup candidates found; keeping all extracted nodes as new')
+        state = DedupResolutionState(
+            resolved_nodes=[None] * len(extracted_nodes),
+            uuid_map={},
+            unresolved_indices=[],
+        )
 
-    for idx, node in enumerate(extracted_nodes):
-        if state.resolved_nodes[idx] is None:
-            state.resolved_nodes[idx] = node
-            state.uuid_map[node.uuid] = node.uuid
+        for idx, (node, candidates) in enumerate(
+            zip(extracted_nodes, candidate_nodes_by_extracted, strict=True)
+        ):
+            if not candidates:
+                continue
 
-    logger.debug(
-        'Resolved nodes: %s',
-        [node.uuid for node in state.resolved_nodes if node is not None],
-    )
+            indexes = _build_candidate_indexes(candidates)
+            local_state = DedupResolutionState(
+                resolved_nodes=[None], uuid_map={}, unresolved_indices=[]
+            )
+            _resolve_with_similarity([node], indexes, local_state)
+            if local_state.resolved_nodes[0] is not None:
+                _commit_resolution(
+                    state,
+                    local_state.resolved_nodes[0],
+                    local_state.uuid_map,
+                    local_state.duplicate_pairs,
+                    idx,
+                )
+                continue
 
-    return (
-        [node for node in state.resolved_nodes if node is not None],
-        state.uuid_map,
-        state.duplicate_pairs,
-    )
+            state.unresolved_indices.append(idx)
+
+        if state.unresolved_indices:
+            llm_candidate_nodes = _merge_candidate_nodes(
+                [
+                    candidate
+                    for idx in state.unresolved_indices
+                    for candidate in candidate_nodes_by_extracted[idx]
+                ],
+                None,
+            )
+            await _resolve_with_llm(
+                llm_client,
+                extracted_nodes,
+                _build_candidate_indexes(llm_candidate_nodes),
+                state,
+                episode,
+                previous_episodes,
+                entity_types,
+            )
+
+        if not state.unresolved_indices and not any(candidate_nodes_by_extracted):
+            logger.debug('No semantic dedup candidates found; keeping all extracted nodes as new')
+
+        for idx, node in enumerate(extracted_nodes):
+            if state.resolved_nodes[idx] is None:
+                state.resolved_nodes[idx] = node
+                state.uuid_map[node.uuid] = node.uuid
+
+        logger.debug(
+            'Resolved nodes: %s',
+            [node.uuid for node in state.resolved_nodes if node is not None],
+        )
+
+        return (
+            [node for node in state.resolved_nodes if node is not None],
+            state.uuid_map,
+            state.duplicate_pairs,
+        )
 
 
 def _build_edges_by_node(edges: list[EntityEdge] | None) -> dict[str, list[EntityEdge]]:
@@ -837,50 +842,53 @@ async def extract_attributes_from_nodes(
     skip_fact_appending: bool = False,
     include_type_descriptions: bool = False,
 ) -> list[EntityNode]:
-    llm_client = clients.llm_client
-    embedder = clients.embedder
+    with clients.tracer.start_span('episode.extract_attributes'):
+        llm_client = clients.llm_client
+        embedder = clients.embedder
 
-    # Pre-build edges lookup for O(E + N) instead of O(N * E)
-    edges_by_node = _build_edges_by_node(edges)
+        # Pre-build edges lookup for O(E + N) instead of O(N * E)
+        edges_by_node = _build_edges_by_node(edges)
 
-    # Extract attributes in parallel (per-entity calls)
-    attribute_results: list[dict[str, Any]] = await semaphore_gather(
-        *[
-            _extract_entity_attributes(
-                llm_client,
-                node,
-                episode,
-                previous_episodes,
-                (
-                    entity_types.get(next((item for item in node.labels if item != 'Entity'), ''))
-                    if entity_types is not None
-                    else None
-                ),
-            )
-            for node in nodes
-        ]
-    )
+        # Extract attributes in parallel (per-entity calls)
+        attribute_results: list[dict[str, Any]] = await semaphore_gather(
+            *[
+                _extract_entity_attributes(
+                    llm_client,
+                    node,
+                    episode,
+                    previous_episodes,
+                    (
+                        entity_types.get(
+                            next((item for item in node.labels if item != 'Entity'), '')
+                        )
+                        if entity_types is not None
+                        else None
+                    ),
+                )
+                for node in nodes
+            ]
+        )
 
-    # _extract_entity_attributes returns the already-merged attribute dict
-    # (overlay of prior + cap-kept fields), so direct assignment is the merge.
-    for node, attributes in zip(nodes, attribute_results, strict=True):
-        node.attributes = attributes
+        # _extract_entity_attributes returns the already-merged attribute dict
+        # (overlay of prior + cap-kept fields), so direct assignment is the merge.
+        for node, attributes in zip(nodes, attribute_results, strict=True):
+            node.attributes = attributes
 
-    # Extract summaries in batch
-    await _extract_entity_summaries_batch(
-        llm_client,
-        nodes,
-        episode,
-        previous_episodes,
-        should_summarize_node,
-        edges_by_node,
-        skip_fact_appending=skip_fact_appending,
-        entity_types=entity_types if include_type_descriptions else None,
-    )
+        # Extract summaries in batch
+        await _extract_entity_summaries_batch(
+            llm_client,
+            nodes,
+            episode,
+            previous_episodes,
+            should_summarize_node,
+            edges_by_node,
+            skip_fact_appending=skip_fact_appending,
+            entity_types=entity_types if include_type_descriptions else None,
+        )
 
-    await create_entity_node_embeddings(embedder, nodes)
+        await create_entity_node_embeddings(embedder, nodes)
 
-    return nodes
+        return nodes
 
 
 async def _extract_entity_attributes(

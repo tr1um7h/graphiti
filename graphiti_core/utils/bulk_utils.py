@@ -133,19 +133,20 @@ async def add_nodes_and_edges_bulk(
     entity_edges: list[EntityEdge],
     embedder: EmbedderClient,
 ):
-    session = driver.session()
-    try:
-        await session.execute_write(
-            add_nodes_and_edges_bulk_tx,
-            episodic_nodes,
-            episodic_edges,
-            entity_nodes,
-            entity_edges,
-            embedder,
-            driver=driver,
-        )
-    finally:
-        await session.close()
+    with driver.tracer.start_span('episode.db_write'):
+        session = driver.session()
+        try:
+            await session.execute_write(
+                add_nodes_and_edges_bulk_tx,
+                episodic_nodes,
+                episodic_edges,
+                entity_nodes,
+                entity_edges,
+                embedder,
+                driver=driver,
+            )
+        finally:
+            await session.close()
 
 
 async def add_nodes_and_edges_bulk_tx(

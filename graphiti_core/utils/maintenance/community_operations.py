@@ -328,25 +328,26 @@ async def update_community(
     embedder: EmbedderClient,
     entity: EntityNode,
 ) -> tuple[list[CommunityNode], list[CommunityEdge]]:
-    community, is_new = await determine_entity_community(driver, entity)
+    with driver.tracer.start_span('episode.update_community'):
+        community, is_new = await determine_entity_community(driver, entity)
 
-    if community is None:
-        return [], []
+        if community is None:
+            return [], []
 
-    new_summary = await summarize_pair(llm_client, (entity.summary, community.summary))
-    new_name = await generate_summary_description(llm_client, new_summary)
+        new_summary = await summarize_pair(llm_client, (entity.summary, community.summary))
+        new_name = await generate_summary_description(llm_client, new_summary)
 
-    community.summary = new_summary
-    community.name = new_name
+        community.summary = new_summary
+        community.name = new_name
 
-    community_edges = []
-    if is_new:
-        community_edge = (build_community_edges([entity], community, utc_now()))[0]
-        await community_edge.save(driver)
-        community_edges.append(community_edge)
+        community_edges = []
+        if is_new:
+            community_edge = (build_community_edges([entity], community, utc_now()))[0]
+            await community_edge.save(driver)
+            community_edges.append(community_edge)
 
-    await community.generate_name_embedding(embedder)
+        await community.generate_name_embedding(embedder)
 
-    await community.save(driver)
+        await community.save(driver)
 
-    return [community], community_edges
+        return [community], community_edges
