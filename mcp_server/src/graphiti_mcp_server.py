@@ -167,6 +167,73 @@ queue_service: QueueService | None = None
 graphiti_client: Graphiti | None = None
 semaphore: asyncio.Semaphore
 
+# Tracer for MCP tool spans
+try:
+    from opentelemetry import trace as _otel_trace
+    from opentelemetry.trace.status import StatusCode as _OtelStatusCode
+
+    _mcp_tracer = _otel_trace.get_tracer('graphiti-mcp-server')
+    _OTEL_AVAILABLE = True
+except ImportError:
+    _mcp_tracer = None
+    _OTEL_AVAILABLE = False
+
+
+def trace_mcp_tool(tool_name: str):
+    """Decorator that wraps an MCP tool function with an OpenTelemetry span.
+
+    Records the tool name, input parameters (truncated), and outcome.
+    If OpenTelemetry is not installed, the decorator is a transparent passthrough.
+    """
+
+    def decorator(fn):
+        if not _OTEL_AVAILABLE:
+            return fn
+
+        async def wrapper(*args, **kwargs):
+            import time as _time
+
+            span_name = f'mcp.tool.{tool_name}'
+            start = _time.time()
+
+            with _mcp_tracer.start_as_current_span(span_name) as span:
+                try:
+                    safe_attrs: dict[str, str | int | float | bool] = {
+                        'mcp.tool.name': tool_name,
+                    }
+                    for key, value in kwargs.items():
+                        if isinstance(value, str | int | float | bool):
+                            safe_attrs[f'mcp.tool.arg.{key}'] = (
+                                value[:200] if isinstance(value, str) else value
+                            )
+                        elif value is not None:
+                            safe_attrs[f'mcp.tool.arg.{key}'] = str(value)[:200]
+                    span.set_attributes(safe_attrs)
+                except Exception:
+                    pass
+
+                try:
+                    result = await fn(*args, **kwargs)
+                    duration_ms = (_time.time() - start) * 1000
+                    span.set_attribute('mcp.tool.duration_ms', round(duration_ms, 1))
+
+                    if isinstance(result, ErrorResponse):
+                        span.set_attribute('mcp.tool.error', result.error[:500])
+                        span.set_status(_OtelStatusCode.ERROR, 'Tool returned error response')
+                    else:
+                        span.set_status(_OtelStatusCode.OK)
+                    return result
+                except Exception as exc:
+                    span.record_exception(exc)
+                    span.set_status(_OtelStatusCode.ERROR, str(exc))
+                    raise
+
+        wrapper.__name__ = fn.__name__
+        wrapper.__doc__ = fn.__doc__
+        wrapper.__annotations__ = fn.__annotations__
+        return wrapper
+
+    return decorator
 
 class GraphitiService:
     """Graphiti service using the unified configuration system."""
@@ -367,6 +434,7 @@ class GraphitiService:
 
 
 @mcp.tool()
+@trace_mcp_tool('add_memory')
 async def add_memory(
     name: str,
     episode_body: str,
@@ -453,6 +521,7 @@ async def add_memory(
 
 
 @mcp.tool()
+@trace_mcp_tool('search_nodes')
 async def search_nodes(
     query: str,
     group_ids: list[str] | None = None,
@@ -533,6 +602,7 @@ async def search_nodes(
 
 
 @mcp.tool()
+@trace_mcp_tool('search_memory_facts')
 async def search_memory_facts(
     query: str,
     group_ids: list[str] | None = None,
@@ -587,6 +657,7 @@ async def search_memory_facts(
 
 
 @mcp.tool()
+@trace_mcp_tool('get_entity')
 async def get_entity(entity_id: str) -> dict[str, Any] | ErrorResponse:
     """Get detailed information about a specific entity.
 
@@ -627,6 +698,7 @@ async def get_entity(entity_id: str) -> dict[str, Any] | ErrorResponse:
 
 
 @mcp.tool()
+@trace_mcp_tool('get_entity_neighbors')
 async def get_entity_neighbors(
     entity_id: str,
     depth: int = 1,
@@ -769,6 +841,7 @@ async def get_entity_neighbors(
 
 
 @mcp.tool()
+@trace_mcp_tool('delete_entity_edge')
 async def delete_entity_edge(uuid: str) -> SuccessResponse | ErrorResponse:
     """Delete an entity edge from the graph memory.
 
@@ -795,6 +868,7 @@ async def delete_entity_edge(uuid: str) -> SuccessResponse | ErrorResponse:
 
 
 @mcp.tool()
+@trace_mcp_tool('delete_episode')
 async def delete_episode(uuid: str) -> SuccessResponse | ErrorResponse:
     """Delete an episode from the graph memory.
 
@@ -819,6 +893,7 @@ async def delete_episode(uuid: str) -> SuccessResponse | ErrorResponse:
 
 
 @mcp.tool()
+@trace_mcp_tool('get_entity_edge')
 async def get_entity_edge(uuid: str) -> dict[str, Any] | ErrorResponse:
     """Get an entity edge from the graph memory by its UUID.
 
@@ -846,6 +921,7 @@ async def get_entity_edge(uuid: str) -> dict[str, Any] | ErrorResponse:
 
 
 @mcp.tool()
+@trace_mcp_tool('get_episodes')
 async def get_episodes(
     group_ids: list[str] | None = None,
     max_episodes: int = 10,
@@ -914,6 +990,7 @@ async def get_episodes(
 
 
 @mcp.tool()
+@trace_mcp_tool('get_group_overview')
 async def get_group_overview(
     group_id: str,
     max_nodes: int = 100,
@@ -1004,6 +1081,7 @@ async def get_group_overview(
 
 
 @mcp.tool()
+@trace_mcp_tool('clear_graph')
 async def clear_graph(group_ids: list[str] | None = None) -> SuccessResponse | ErrorResponse:
     """Clear all data from the graph for specified group IDs.
 
@@ -1045,6 +1123,7 @@ async def clear_graph(group_ids: list[str] | None = None) -> SuccessResponse | E
 
 
 @mcp.tool()
+@trace_mcp_tool('get_status')
 async def get_status() -> StatusResponse:
     """Get the status of the Graphiti MCP server and database connection."""
     global graphiti_service

@@ -209,16 +209,24 @@ def _build_client(settings: Settings) -> ZepGraphiti:
 
 
 async def get_graphiti(settings: ZepEnvDep):
+    logger.info('Creating Graphiti client for request')
     client = _build_client(settings)
     try:
         yield client
     finally:
+        logger.info('Closing Graphiti client after request')
         await client.close()
 
 
 async def initialize_graphiti(settings: ZepEnvDep):
+    logger.info('Initializing Graphiti client for schema setup')
     client = _build_client(settings)
-    await client.build_indices_and_constraints()
+    try:
+        await client.build_indices_and_constraints()
+        logger.info('Graphiti schema setup completed')
+    finally:
+        logger.info('Closing Graphiti client after schema setup')
+        await client.close()
 
 
 def get_fact_result_from_edge(edge: EntityEdge):

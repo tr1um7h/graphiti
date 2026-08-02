@@ -2,7 +2,7 @@
   "title": "Graphiti Performance",
   "uid": "graphiti-performance",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 9,
   "refresh": "10s",
   "time": {
     "from": "now-1h",
@@ -398,7 +398,7 @@
     },
     {
       "type": "table",
-      "title": "Slowest Spans",
+      "title": "Slowest Traces",
       "gridPos": {
         "h": 8,
         "w": 12,
@@ -413,9 +413,32 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT span_name, round(max(duration_nano)/1000000, 0) AS max_ms, round(avg(duration_nano)/1000000, 0) AS avg_ms, count(*) AS calls FROM opentelemetry_traces WHERE $__timeFilter(timestamp) AND ('${trace_id}' = '' OR trace_id = '${trace_id}') AND span_name LIKE 'graphiti.%' GROUP BY span_name ORDER BY max_ms DESC LIMIT 15"
+          "rawSql": "SELECT trace_id, round(max(duration_nano)/1000000, 0) AS duration_ms, count(*) AS spans, min(timestamp) AS started FROM opentelemetry_traces WHERE $__timeFilter(timestamp) AND span_name LIKE 'graphiti.%' GROUP BY trace_id ORDER BY duration_ms DESC LIMIT 15"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View trace waterfall",
+                    "url": "/d/graphiti-performance?var-trace_id=${__value.raw}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       "type": "table",
@@ -436,7 +459,30 @@
           "format": "table",
           "rawSql": "SELECT trace_id, span_name, round(duration_nano/1000000, 0) AS duration_ms, span_status_code AS status, timestamp FROM opentelemetry_traces WHERE $__timeFilter(timestamp) AND ('${trace_id}' = '' OR trace_id = '${trace_id}') AND span_name IN ('graphiti.add_episode', 'graphiti.search', 'http.server.request') ORDER BY timestamp DESC LIMIT 20"
         }
-      ]
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "trace_id"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "View trace waterfall",
+                    "url": "/d/graphiti-performance?var-trace_id=${__value.raw}",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       "type": "table",
@@ -455,7 +501,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT span_name, parent_span_id AS parent, span_id, round(duration_nano/1000000, 1) AS duration_ms, span_status_code AS status, \"span_attributes.model\" AS model, \"span_attributes.llm.provider\" AS llm_provider FROM opentelemetry_traces WHERE ('${trace_id}' = '' OR trace_id = '${trace_id}') ORDER BY timestamp ASC LIMIT 200"
+          "rawSql": "SELECT trace_id, span_name, round(duration_nano/1000000, 1) AS duration_ms, timestamp FROM opentelemetry_traces WHERE $__timeFilter(timestamp) AND ('${trace_id}' = '' OR trace_id = '${trace_id}') ORDER BY timestamp DESC LIMIT 200"
         }
       ],
       "description": "Paste a trace_id in the Trace ID input at the top to see all spans in that trace, ordered by time."
@@ -480,6 +526,16 @@
           "rawSql": "SELECT severity_text AS level, body AS message, trace_id, scope_name AS module, timestamp FROM graphiti_logs WHERE $__timeFilter(timestamp) AND ('${trace_id}' = '' OR trace_id = '${trace_id}') ORDER BY timestamp DESC LIMIT 100"
         }
       ]
+    }
+  ],
+  "links": [
+    {
+      "title": "Clear",
+      "type": "link",
+      "icon": "trash",
+      "url": "/d/graphiti-performance?var-trace_id=",
+      "targetBlank": false,
+      "keepTime": true
     }
   ]
 }

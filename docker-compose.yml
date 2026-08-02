@@ -101,12 +101,18 @@ services:
       - HTTP_PROXY=
       - HTTPS_PROXY=
       - ALL_PROXY=
+      # OpenTelemetry — send traces and metrics to the collector
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-http://otel-collector:4318}
+      - OTEL_SERVICE_NAME=graphiti-mcp-server
     volumes:
       - ./mcp_server/config/config-docker-postgres-age.yaml:/app/mcp/config/config.yaml:ro
       - mcp_logs:/var/log/graphiti
     ports:
       - "${MCP_PORT:-8001}:8000"
     command: ["uv", "run", "main.py"]
+    networks:
+      - default
+      - observability
 
   # Graphiti Web UI (Next.js)
   web-service:
@@ -181,6 +187,7 @@ services:
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_SECURITY_DISABLE_SANITIZE_HTML=true
       - GF_INSTALL_PLUGINS=
     volumes:
       - ./observability/grafana-dashboards:/etc/grafana/provisioning/dashboards:ro

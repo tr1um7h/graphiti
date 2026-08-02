@@ -1880,11 +1880,13 @@ class Graphiti:
         than a list of facts. This endpoint allows the end user to utilize more advanced features such as filters and
         different search and reranker methodologies across different layers in the graph.
 
-        For different config recipes refer to search/search_config_recipes.
-        """
+       For different config recipes refer to search/search_config_recipes.
+       """
+        start_time = time()
         with self.tracer.start_span('search') as span:
-            span.add_attributes({'search.type': getattr(config, 'search_type', 'custom')})
-            return await search(
+            search_type = getattr(config, 'search_type', 'custom')
+            span.add_attributes({'search.type': search_type})
+            results = await search(
                 self.clients,
                 query,
                 group_ids,
@@ -1894,6 +1896,15 @@ class Graphiti:
                 bfs_origin_node_uuids,
                 driver=driver,
             )
+
+        # Record metrics
+        duration_ms = (time() - start_time) * 1000
+        result_count = len(results.edges) if results and results.edges else 0
+        self._search_counter.add(1, {'type': search_type})
+        self._search_duration.record(duration_ms, {'type': search_type})
+        self._search_result_count.record(result_count, {'type': search_type})
+
+        return results
 
     async def get_nodes_and_edges_by_episode(self, episode_uuids: list[str]) -> SearchResults:
         episodes = await EpisodicNode.get_by_uuids(self.driver, episode_uuids)
