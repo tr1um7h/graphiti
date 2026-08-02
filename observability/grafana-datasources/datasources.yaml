@@ -11,3 +11,22 @@ datasources:
     editable: true
     jsonData:
       timeInterval: 5s
+  - name: GreptimeDB PromQL
+    uid: greptimedb-promql
+    type: prometheus
+    access: proxy
+    url: http://greptime:4000/v1/prometheus
+    isDefault: false
+    editable: true
+    jsonData:
+      timeInterval: 10s
+      httpMethod: POST
+  - name: GreptimeDB Logs
+    uid: greptimedb-logs
+    type: loki
+    access: proxy
+    url: http://greptime:4000/v1/loki
+    isDefault: false
+    editable: true
+    jsonData:
+      maxLines: 1000

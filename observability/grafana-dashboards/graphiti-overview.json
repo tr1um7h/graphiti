@@ -1,8 +1,8 @@
 {
-  "title": "Graphiti Observability",
+  "title": "Graphiti Overview",
   "uid": "graphiti-overview",
   "schemaVersion": 39,
-  "version": 4,
+  "version": 1,
   "refresh": "10s",
   "time": { "from": "now-1h", "to": "now" },
   "panels": [
@@ -14,7 +14,7 @@
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.add_episode' AND timestamp > now() - INTERVAL '1' HOUR"
+        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.add_episode' AND $__timeFilter(timestamp)"
       }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
     },
@@ -26,7 +26,7 @@
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.search' AND timestamp > now() - INTERVAL '1' HOUR"
+        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.search' AND $__timeFilter(timestamp)"
       }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
     },
@@ -38,7 +38,7 @@
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.llm.generate' AND timestamp > now() - INTERVAL '1' HOUR"
+        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.llm.generate' AND $__timeFilter(timestamp)"
       }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
     },
@@ -50,30 +50,30 @@
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name LIKE 'graphiti.episode.%write%' AND timestamp > now() - INTERVAL '1' HOUR"
+        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name LIKE 'graphiti.episode.%write%' AND $__timeFilter(timestamp)"
       }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
     },
     {
       "type": "table",
-      "title": "Add Episode - Recent",
+      "title": "Recent Episodes",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 4 },
       "datasource": { "type": "mysql", "uid": "greptimedb" },
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT trace_id, span_name, duration_nano/1000000 AS duration_ms, span_status_code, timestamp FROM opentelemetry_traces WHERE span_name LIKE 'graphiti.%' ORDER BY timestamp DESC LIMIT 30"
+        "rawSql": "SELECT trace_id, span_name, duration_nano/1000000 AS duration_ms, span_status_code AS status, timestamp FROM opentelemetry_traces WHERE span_name LIKE 'graphiti.%' AND $__timeFilter(timestamp) ORDER BY timestamp DESC LIMIT 30"
       }]
     },
     {
       "type": "table",
-      "title": "Span Call Counts (1h)",
+      "title": "Span Call Counts",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "datasource": { "type": "mysql", "uid": "greptimedb" },
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT span_name, count(*) AS calls, round(avg(duration_nano)/1000000, 1) AS avg_ms, round(max(duration_nano)/1000000, 1) AS max_ms FROM opentelemetry_traces WHERE timestamp > now() - INTERVAL '1' HOUR GROUP BY span_name ORDER BY calls DESC LIMIT 20"
+        "rawSql": "SELECT span_name, count(*) AS calls, round(avg(duration_nano)/1000000, 1) AS avg_ms, round(max(duration_nano)/1000000, 1) AS max_ms FROM opentelemetry_traces WHERE $__timeFilter(timestamp) GROUP BY span_name ORDER BY calls DESC LIMIT 20"
       }]
     },
     {
@@ -84,7 +84,7 @@
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT trace_id, span_name, service_name, duration_nano/1000000 AS duration_ms, span_status_code, timestamp FROM opentelemetry_traces ORDER BY timestamp DESC LIMIT 30"
+        "rawSql": "SELECT trace_id, span_name, service_name, duration_nano/1000000 AS duration_ms, span_status_code AS status, timestamp FROM opentelemetry_traces WHERE $__timeFilter(timestamp) ORDER BY timestamp DESC LIMIT 30"
       }]
     }
   ]
