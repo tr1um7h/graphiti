@@ -138,6 +138,7 @@ services:
   # ===== OpenTelemetry Collector =====
   otel-collector:
     profiles: ["observability", "all"]
+    platform: linux/amd64
     image: otel/opentelemetry-collector-contrib:0.104.0
     container_name: graphiti-otel-collector
     command: ["--config=/etc/otelcol/config.yaml"]
@@ -157,6 +158,7 @@ services:
   # ===== GreptimeDB (traces + metrics + logs 统一存储) =====
   greptime:
     profiles: ["observability", "all"]
+    platform: linux/amd64
     image: greptime/greptimedb:v1.1.0
     container_name: graphiti-greptime
     command: ["standalone", "start", "--http-addr=0.0.0.0:4000", "--grpc-bind-addr=0.0.0.0:4001", "--mysql-addr=0.0.0.0:4002"]
@@ -173,6 +175,7 @@ services:
   # ===== Grafana =====
   grafana:
     profiles: ["observability", "all"]
+    platform: linux/amd64
     image: grafana/grafana:11.1.0
     container_name: graphiti-grafana
     environment:
