@@ -914,6 +914,96 @@ async def get_episodes(
 
 
 @mcp.tool()
+async def get_group_overview(
+    group_id: str,
+    max_nodes: int = 100,
+    max_edges: int = 200,
+) -> dict[str, Any] | ErrorResponse:
+    """Get a complete overview of a knowledge graph group.
+
+    Unlike search_nodes and search_memory_facts (which require a semantic query),
+    this tool directly lists ALL entity nodes and entity edges for a given group_id
+    without any embedding search. This is the fastest way to retrieve the full
+    graph contents for a group.
+
+    Args:
+        group_id: The group ID to retrieve all data for
+        max_nodes: Maximum number of entity nodes to return (default: 100)
+        max_edges: Maximum number of entity edges (facts) to return (default: 200)
+
+    Returns:
+        dict with 'nodes' (list of entity nodes with name, summary, labels, etc.)
+        and 'edges' (list of entity edges with fact, name, source/target, etc.)
+    """
+    global graphiti_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+
+    try:
+        from graphiti_core.nodes import EntityNode
+        from graphiti_core.edges import EntityEdge
+        from graphiti_core.errors import GroupsEdgesNotFoundError
+
+        client = await graphiti_service.get_client()
+
+        # Direct list - no embedding search needed
+        nodes = await EntityNode.get_by_group_ids(
+            client.driver, [group_id], limit=max_nodes
+        )
+
+        try:
+            edges = await EntityEdge.get_by_group_ids(
+                client.driver, [group_id], limit=max_edges
+            )
+        except GroupsEdgesNotFoundError:
+            edges = []
+
+        # Format nodes
+        node_list = []
+        for node in nodes:
+            labels = node.labels if hasattr(node, 'labels') and node.labels else []
+            if isinstance(labels, str):
+                labels = [labels] if labels else []
+            node_list.append({
+                'uuid': node.uuid,
+                'name': node.name,
+                'labels': labels,
+                'summary': node.summary,
+                'group_id': node.group_id,
+                'created_at': node.created_at.isoformat() if node.created_at else None,
+            })
+
+        # Format edges
+        edge_list = []
+        for edge in edges:
+            edge_list.append({
+                'uuid': edge.uuid,
+                'fact': edge.fact,
+                'name': edge.name,
+                'source_node_uuid': edge.source_node_uuid,
+                'target_node_uuid': edge.target_node_uuid,
+                'created_at': edge.created_at.isoformat() if edge.created_at else None,
+                'expired_at': edge.expired_at.isoformat() if edge.expired_at else None,
+                'valid_at': edge.valid_at.isoformat() if edge.valid_at else None,
+                'invalid_at': edge.invalid_at.isoformat() if edge.invalid_at else None,
+                'episodes': edge.episodes,
+            })
+
+        return {
+            'group_id': group_id,
+            'nodes': node_list,
+            'edges': edge_list,
+            'node_count': len(node_list),
+            'edge_count': len(edge_list),
+        }
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f'Error getting group overview: {error_msg}')
+        return ErrorResponse(error=f'Error getting group overview: {error_msg}')
+
+
+@mcp.tool()
 async def clear_graph(group_ids: list[str] | None = None) -> SuccessResponse | ErrorResponse:
     """Clear all data from the graph for specified group IDs.
 
