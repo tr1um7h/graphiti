@@ -21,6 +21,13 @@ from graph_service.dto import (
 )
 from graph_service.zep_graphiti import ZepGraphitiDep
 
+try:
+    from opentelemetry import context as otel_context
+
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
+
 
 async def _resolve_schema_params(schema_id: int | None):
     """Resolve a schema_id into Graphiti extraction parameters.
@@ -56,7 +63,7 @@ class AsyncWorker:
     """Async job queue that tracks job metadata for status queries."""
 
     def __init__(self):
-        self.queue: asyncio.Queue[tuple[partial, JobInfo]] = asyncio.Queue()
+        self.queue: asyncio.Queue[tuple[partial, JobInfo, object | None]] = asyncio.Queue()
         self.task = None
         # All jobs since startup (including completed/failed) — capped to last 100
         self._jobs: list[JobInfo] = []
@@ -96,10 +103,11 @@ class AsyncWorker:
                     flush=True,
                     file=sys.stderr,
                 )
-                job_fn, job_info = await self.queue.get()
+                job_fn, job_info, saved_ctx = await self.queue.get()
                 job_info.status = 'processing'
                 self._current = job_info
                 print(f'Processing job: {job_info.name}...', flush=True, file=sys.stderr)
+                token = otel_context.attach(saved_ctx) if OTEL_AVAILABLE and saved_ctx else None
                 try:
                     await job_fn()
                     job_info.status = 'completed'
@@ -110,6 +118,8 @@ class AsyncWorker:
                     print(f'❌ Job failed [{job_info.name}]: {e}', flush=True, file=sys.stderr)
                     traceback.print_exc(file=sys.stderr)
                 finally:
+                    if token is not None:
+                        otel_context.detach(token)
                     self._current = None
                     self._trim()
             except asyncio.CancelledError:
@@ -132,7 +142,8 @@ class AsyncWorker:
 
     def submit(self, job_fn: partial, info: JobInfo):
         self._jobs.append(info)
-        self.queue.put_nowait((job_fn, info))
+        ctx = otel_context.get_current() if OTEL_AVAILABLE else None
+        self.queue.put_nowait((job_fn, info, ctx))
 
 
 # 公开的 AsyncWorker 实例，供 main.py lifespan 使用

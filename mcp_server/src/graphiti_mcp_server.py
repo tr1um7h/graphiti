@@ -32,6 +32,9 @@ from models.response_types import (
     StatusResponse,
     SuccessResponse,
 )
+from pydantic import BaseModel, Field
+from typing import Any
+from datetime import datetime
 from services.factories import DatabaseDriverFactory, EmbedderFactory, LLMClientFactory
 from services.queue_service import QueueService
 from utils.formatting import format_fact_result
@@ -581,6 +584,188 @@ async def search_memory_facts(
         error_msg = str(e)
         logger.error(f'Error searching facts: {error_msg}')
         return ErrorResponse(error=f'Error searching facts: {error_msg}')
+
+
+@mcp.tool()
+async def get_entity(entity_id: str) -> dict[str, Any] | ErrorResponse:
+    """Get detailed information about a specific entity.
+
+    Args:
+        entity_id: UUID of the entity to retrieve
+
+    Returns:
+        dict with entity details (id, name, labels, summary, created_at, group_id, attributes)
+    """
+    global graphiti_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+
+    try:
+        from graphiti_core.nodes import EntityNode
+
+        client = await graphiti_service.get_client()
+        entity = await EntityNode.get_by_uuid(client.driver, entity_id)
+
+        labels = entity.labels or []
+        if isinstance(labels, str):
+            labels = [labels] if labels else []
+
+        return {
+            'id': entity.uuid,
+            'name': entity.name,
+            'labels': labels,
+            'summary': entity.summary or '',
+            'created_at': entity.created_at.isoformat() if entity.created_at else None,
+            'group_id': entity.group_id,
+            'attributes': entity.attributes or {},
+        }
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f'Error getting entity: {error_msg}')
+        return ErrorResponse(error=f'Entity not found: {error_msg}')
+
+
+@mcp.tool()
+async def get_entity_neighbors(
+    entity_id: str,
+    depth: int = 1,
+) -> dict[str, Any] | ErrorResponse:
+    """Get neighboring entities and connecting edges.
+
+    Args:
+        entity_id: UUID of the center entity
+        depth: Traversal depth (1 = direct neighbors, 2+ = multi-hop)
+
+    Returns:
+        dict with center entity, neighbor nodes, and connecting edges
+    """
+    global graphiti_service
+
+    if graphiti_service is None:
+        return ErrorResponse(error='Graphiti service not initialized')
+
+    try:
+        from graphiti_core.nodes import EntityNode
+
+        client = await graphiti_service.get_client()
+        center_entity = await EntityNode.get_by_uuid(client.driver, entity_id)
+
+        center_labels = center_entity.labels or []
+        if isinstance(center_labels, str):
+            center_labels = [center_labels] if center_labels else []
+
+        center_node = {
+            'id': center_entity.uuid,
+            'name': center_entity.name,
+            'labels': center_labels,
+            'summary': center_entity.summary or '',
+            'attributes': center_entity.attributes or {},
+        }
+
+        # Query neighbors
+        if depth == 1:
+            neighbors_result, _, _ = await client.driver.execute_query(
+                """
+                SELECT
+                    n.uuid AS uuid, n.name AS name,
+                    n.summary AS summary, n.attributes AS attributes,
+                    e.uuid AS edge_uuid, e.name AS edge_name,
+                    e.fact AS edge_fact, e.created_at AS edge_created_at,
+                    e.source_node_uuid AS source_uuid,
+                    e.target_node_uuid AS target_uuid
+                FROM entity_edges e
+                JOIN entity_nodes n ON (
+                    (n.uuid = e.target_node_uuid AND e.source_node_uuid = %s)
+                    OR
+                    (n.uuid = e.source_node_uuid AND e.target_node_uuid = %s)
+                )
+                WHERE n.uuid != %s
+                LIMIT 500
+                """,
+                params=(entity_id, entity_id, entity_id),
+            )
+        else:
+            neighbors_result, _, _ = await client.driver.execute_query(
+                """
+                WITH RECURSIVE neighbor_chain AS (
+                    SELECT
+                        e.target_node_uuid AS neighbor_uuid,
+                        e.uuid AS edge_uuid, e.name AS edge_name,
+                        e.fact AS edge_fact, e.created_at AS edge_created_at,
+                        e.source_node_uuid AS source_uuid,
+                        e.target_node_uuid AS target_uuid,
+                        1 AS hop
+                    FROM entity_edges e
+                    WHERE e.source_node_uuid = %s
+                    UNION
+                    SELECT
+                        e2.target_node_uuid AS neighbor_uuid,
+                        e2.uuid AS edge_uuid, e2.name AS edge_name,
+                        e2.fact AS edge_fact, e2.created_at AS edge_created_at,
+                        e2.source_node_uuid AS source_uuid,
+                        e2.target_node_uuid AS target_uuid,
+                        nc.hop + 1
+                    FROM neighbor_chain nc
+                    JOIN entity_edges e2 ON e2.source_node_uuid = nc.neighbor_uuid
+                    WHERE nc.hop < %s
+                )
+                SELECT
+                    n.uuid AS uuid, n.name AS name,
+                    n.summary AS summary, n.attributes AS attributes,
+                    nc.edge_uuid, nc.edge_name,
+                    nc.edge_fact, nc.edge_created_at,
+                    nc.source_uuid, nc.target_uuid
+                FROM neighbor_chain nc
+                JOIN entity_nodes n ON n.uuid = nc.neighbor_uuid
+                WHERE n.uuid != %s
+                LIMIT 1000
+                """,
+                params=(entity_id, depth, entity_id),
+            )
+
+        # Process results
+        nodes = {}
+        edges = []
+
+        for record in neighbors_result or []:
+            data = record if isinstance(record, dict) else {}
+
+            neighbor_uuid = data.get('uuid', '')
+            if neighbor_uuid and neighbor_uuid not in nodes and neighbor_uuid != entity_id:
+                labels = data.get('labels', [])
+                if isinstance(labels, str):
+                    labels = [labels] if labels else []
+
+                nodes[neighbor_uuid] = {
+                    'id': neighbor_uuid,
+                    'name': data.get('name', ''),
+                    'labels': labels,
+                    'summary': data.get('summary', ''),
+                    'attributes': data.get('attributes', {}) or {},
+                }
+
+            edge_uuid = data.get('edge_uuid', '')
+            if edge_uuid:
+                edges.append({
+                    'id': edge_uuid,
+                    'source_node_uuid': data.get('source_uuid', ''),
+                    'target_node_uuid': data.get('target_uuid', ''),
+                    'name': data.get('edge_name', ''),
+                    'fact': data.get('edge_fact', ''),
+                    'created_at': data.get('edge_created_at', datetime.now().isoformat()),
+                })
+
+        return {
+            'center': center_node,
+            'nodes': list(nodes.values()),
+            'edges': edges,
+        }
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f'Error getting entity neighbors: {error_msg}')
+        return ErrorResponse(error=f'Entity not found: {error_msg}')
 
 
 @mcp.tool()

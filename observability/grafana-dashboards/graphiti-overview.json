@@ -44,13 +44,13 @@
     },
     {
       "type": "stat",
-      "title": "DB Queries",
+      "title": "DB Writes",
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "datasource": { "type": "mysql", "uid": "greptimedb" },
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name = 'graphiti.db.query' AND timestamp > now() - INTERVAL '1' HOUR"
+        "rawSql": "SELECT count(*) AS value FROM opentelemetry_traces WHERE span_name LIKE 'graphiti.episode.%write%' AND timestamp > now() - INTERVAL '1' HOUR"
       }],
       "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value" }
     },
