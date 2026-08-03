@@ -4,6 +4,7 @@ Graphiti MCP Server - Exposes Graphiti functionality through the Model Context P
 """
 
 import argparse
+from functools import wraps
 import asyncio
 import logging
 import os
@@ -169,8 +170,28 @@ semaphore: asyncio.Semaphore
 
 # Tracer for MCP tool spans
 try:
+    import os as _os
     from opentelemetry import trace as _otel_trace
     from opentelemetry.trace.status import StatusCode as _OtelStatusCode
+    from opentelemetry.sdk.resources import Resource as _Resource
+    from opentelemetry.sdk.trace import TracerProvider as _TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor as _BatchSpanProcessor
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter as _OTLPSpanExporter
+
+    _otlp_endpoint = _os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', '')
+    _service_name = _os.getenv('OTEL_SERVICE_NAME', 'graphiti-mcp-server')
+
+    if _otlp_endpoint:
+        _resource = _Resource.create({
+            'service.name': _service_name,
+        })
+        _provider = _TracerProvider(resource=_resource)
+        _exporter = _OTLPSpanExporter(endpoint=f'{_otlp_endpoint}/v1/traces')
+        _provider.add_span_processor(_BatchSpanProcessor(_exporter))
+        _otel_trace.set_tracer_provider(_provider)
+        logger.info(f'OTel tracing enabled, exporting to {_otlp_endpoint}')
+    else:
+        logger.info('OTEL_EXPORTER_OTLP_ENDPOINT not set, tracing disabled (NoOpTracer)')
 
     _mcp_tracer = _otel_trace.get_tracer('graphiti-mcp-server')
     _OTEL_AVAILABLE = True
@@ -190,6 +211,9 @@ def trace_mcp_tool(tool_name: str):
         if not _OTEL_AVAILABLE:
             return fn
 
+        import inspect as _inspect
+
+        @wraps(fn)
         async def wrapper(*args, **kwargs):
             import time as _time
 
@@ -217,8 +241,8 @@ def trace_mcp_tool(tool_name: str):
                     duration_ms = (_time.time() - start) * 1000
                     span.set_attribute('mcp.tool.duration_ms', round(duration_ms, 1))
 
-                    if isinstance(result, ErrorResponse):
-                        span.set_attribute('mcp.tool.error', result.error[:500])
+                    if isinstance(result, dict) and 'error' in result:
+                        span.set_attribute('mcp.tool.error', str(result['error'])[:500])
                         span.set_status(_OtelStatusCode.ERROR, 'Tool returned error response')
                     else:
                         span.set_status(_OtelStatusCode.OK)
@@ -228,9 +252,7 @@ def trace_mcp_tool(tool_name: str):
                     span.set_status(_OtelStatusCode.ERROR, str(exc))
                     raise
 
-        wrapper.__name__ = fn.__name__
-        wrapper.__doc__ = fn.__doc__
-        wrapper.__annotations__ = fn.__annotations__
+        wrapper.__signature__ = _inspect.signature(fn)
         return wrapper
 
     return decorator
@@ -305,6 +327,7 @@ class GraphitiService:
                         llm_client=llm_client,
                         embedder=embedder_client,
                         max_coroutines=self.semaphore_limit,
+                        tracer=_mcp_tracer,
                     )
                 elif db_provider == 'postgres_age':
                     # For Postgres AGE, create a PostgresAgeDriver instance
@@ -321,6 +344,7 @@ class GraphitiService:
                         llm_client=llm_client,
                         embedder=embedder_client,
                         max_coroutines=self.semaphore_limit,
+                        tracer=_mcp_tracer,
                     )
                 else:
                     # For Neo4j (default), use the original approach
@@ -331,6 +355,7 @@ class GraphitiService:
                         llm_client=llm_client,
                         embedder=embedder_client,
                         max_coroutines=self.semaphore_limit,
+                        tracer=_mcp_tracer,
                     )
             except Exception as db_error:
                 # Check for connection errors
@@ -990,18 +1015,21 @@ async def get_episodes(
 
 
 @mcp.tool()
-@trace_mcp_tool('get_group_overview')
-async def get_group_overview(
+@trace_mcp_tool('dump_graph')
+async def dump_graph(
     group_id: str,
     max_nodes: int = 100,
     max_edges: int = 200,
 ) -> dict[str, Any] | ErrorResponse:
-    """Get a complete overview of a knowledge graph group.
+    """List all entities and facts in the graph.
 
-    Unlike search_nodes and search_memory_facts (which require a semantic query),
-    this tool directly lists ALL entity nodes and entity edges for a given group_id
-    without any embedding search. This is the fastest way to retrieve the full
-    graph contents for a group.
+     Use this tool when you need:
+         - A complete view of all stored knowledge
+         - To see what information is available before searching
+         - To understand the graph structure
+
+         Returns all entities (nodes) and facts (edges) with their metadata.
+         For large graphs, consider using search_entities or search_facts instead.
 
     Args:
         group_id: The group ID to retrieve all data for
