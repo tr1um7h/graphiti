@@ -62,7 +62,7 @@
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT trace_id, span_name, duration_nano/1000000 AS duration_ms, span_status_code AS status, timestamp FROM opentelemetry_traces WHERE span_name LIKE 'graphiti.%' AND $__timeFilter(timestamp) ORDER BY timestamp DESC LIMIT 30"
+        "rawSql": "SELECT trace_id, span_name, duration_nano/1000000 AS duration_ms, timestamp FROM opentelemetry_traces WHERE span_name LIKE 'graphiti.%' AND $__timeFilter(timestamp) ORDER BY timestamp DESC LIMIT 30"
       }]
     },
     {
@@ -84,7 +84,7 @@
       "targets": [{
         "refId": "A",
         "format": "table",
-        "rawSql": "SELECT trace_id, span_name, service_name, duration_nano/1000000 AS duration_ms, span_status_code AS status, timestamp FROM opentelemetry_traces WHERE $__timeFilter(timestamp) ORDER BY timestamp DESC LIMIT 30"
+        "rawSql": "SELECT trace_id, span_name, duration_nano/1000000 AS duration_ms, timestamp FROM opentelemetry_traces WHERE $__timeFilter(timestamp) ORDER BY timestamp DESC LIMIT 30"
       }]
     }
   ]

@@ -457,7 +457,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT trace_id, span_name, round(duration_nano/1000000, 0) AS duration_ms, span_status_code AS status, timestamp FROM opentelemetry_traces WHERE $__timeFilter(timestamp) AND ('${trace_id}' = '' OR trace_id = '${trace_id}') AND span_name IN ('graphiti.add_episode', 'graphiti.search', 'http.server.request') ORDER BY timestamp DESC LIMIT 20"
+          "rawSql": "SELECT trace_id, span_name, round(duration_nano/1000000, 0) AS duration_ms, timestamp FROM opentelemetry_traces WHERE $__timeFilter(timestamp) AND ('${trace_id}' = '' OR trace_id = '${trace_id}') AND span_name IN ('graphiti.add_episode', 'graphiti.search', 'http.server.request') ORDER BY timestamp DESC LIMIT 20"
         }
       ],
       "fieldConfig": {
@@ -523,7 +523,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT severity_text AS level, body AS message, trace_id, scope_name AS module, timestamp FROM graphiti_logs WHERE $__timeFilter(timestamp) AND ('${trace_id}' = '' OR trace_id = '${trace_id}') ORDER BY timestamp DESC LIMIT 100"
+          "rawSql": "SELECT severity_text AS level, body AS message, trace_id, timestamp FROM graphiti_logs WHERE $__timeFilter(timestamp) AND ('${trace_id}' = '' OR trace_id = '${trace_id}') ORDER BY timestamp DESC LIMIT 100"
         }
       ]
     }
