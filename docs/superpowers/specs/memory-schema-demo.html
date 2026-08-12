@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Schema — Graphiti Design Demo</title>
+<style>
+  :root{
+    --bg:#0a0a0b;
+    --bg-dot:#161618;
+    --card:#151517;
+    --card-border:#2a2a2e;
+    --card-hover:#1d1d20;
+    --text:#e6e6e8;
+    --text-dim:#8a8a92;
+    --text-faint:#55555c;
+    --accent-green:#3ecf8e;
+    --accent-purple:#a78bfa;
+    --accent-amber:#f0b840;
+    --accent-cyan:#38d0e0;
+    --chip-bg:#1d1d21;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;background:var(--bg);}
+  body{
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    color:var(--text);
+    background-image:radial-gradient(var(--bg-dot) 1px,transparent 1px);
+    background-size:22px 22px;
+    overflow:hidden;
+  }
+  .app{height:100vh;display:flex;flex-direction:column;}
+
+  /* ─── HEADER ─── */
+  header{display:flex;align-items:flex-start;justify-content:space-between;padding:22px 28px 14px;}
+  .title-block h1{font-size:22px;font-weight:600;letter-spacing:-0.01em;margin-bottom:4px;}
+  .title-block p{font-size:13px;color:var(--text-dim);}
+  .title-block b{color:var(--text);font-weight:600;}
+  .header-right{display:flex;gap:10px;align-items:center;}
+  .pill{
+    display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--card-border);
+    border-radius:8px;padding:8px 12px;font-size:13px;
+  }
+  .dot-cyan{width:7px;height:7px;border-radius:50%;background:var(--accent-cyan);}
+  .dot-green{width:7px;height:7px;border-radius:50%;background:var(--accent-green);}
+  .dot-purple{width:7px;height:7px;border-radius:50%;background:var(--accent-purple);}
+  .dot-amber{width:7px;height:7px;border-radius:50%;background:var(--accent-amber);}
+
+  /* ─── TOOLBAR ─── */
+  .toolbar{display:flex;align-items:center;justify-content:space-between;padding:0 28px 16px;}
+  .toolbar-left,.toolbar-right{display:flex;gap:8px;align-items:center;}
+  .toolbar-pill{
+    display:flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--card-border);
+    color:var(--text-dim);border-radius:7px;padding:7px 11px;font-size:12.5px;
+  }
+  .toolbar-pill b{color:var(--text);font-weight:500;}
+
+  /* ─── CANVAS ─── */
+  .canvas-wrap{position:relative;flex:1;overflow:hidden;}
+  .hint{
+    position:absolute;top:16px;left:28px;font-size:13px;color:var(--text-faint);
+    z-index:4;transition:opacity .2s;
+  }
+  .focus-info{
+    position:absolute;top:16px;left:28px;font-size:13px;z-index:6;display:none;align-items:center;gap:10px;
+  }
+  .focus-info.show{display:flex;}
+  .focus-info .lbl{color:var(--text-faint);}
+  .focus-info b{color:var(--text);font-weight:600;}
+  .clear-focus{color:var(--accent-green);cursor:pointer;font-weight:500;border-bottom:1px solid transparent;}
+  .clear-focus:hover{border-bottom-color:var(--accent-green);}
+
+  .canvas-scale{position:absolute;inset:0;transform-origin:50% 0%;transition:transform .2s;}
+
+  svg#edges{position:absolute;inset:0;width:100%;height:100%;z-index:1;overflow:visible;pointer-events:none;}
+  .edge-path{fill:none;stroke-width:1.6;transition:opacity .25s;filter:drop-shadow(0 0 3px currentColor);}
+  .edge-label{
+    position:absolute;z-index:3;font-size:10px;color:var(--text);background:var(--bg);
+    padding:2px 6px;border-radius:4px;white-space:nowrap;transform:translate(-50%,-50%);
+    pointer-events:none;border:1px solid var(--card-border);
+  }
+
+  .columns{position:relative;z-index:3;display:flex;gap:48px;padding:44px 28px 40px;height:100%;}
+  .column{width:200px;flex-shrink:0;}
+  .col-title{
+    font-size:10.5px;letter-spacing:.12em;color:var(--text-faint);text-align:center;
+    margin-bottom:14px;font-weight:600;
+  }
+
+  .card{
+    background:var(--card);border:1px solid var(--card-border);border-radius:10px;
+    padding:10px 12px 11px;margin-bottom:16px;
+  }
+  .card-head{display:flex;align-items:center;gap:7px;margin-bottom:8px;}
+  .card-name{font-size:10.5px;letter-spacing:.06em;color:var(--text-dim);font-weight:600;flex:1;}
+  .card-count{font-size:10px;color:var(--text-faint);background:var(--chip-bg);border-radius:8px;padding:1px 6px;}
+
+  .card-item{
+    font-size:12px;color:var(--text);padding:3px 6px;border-radius:5px;margin:1px -6px;
+    cursor:pointer;line-height:1.5;transition:all .15s;
+  }
+  .card-item:hover{background:var(--card-hover);}
+  .card-item.selected{
+    outline:1.5px solid var(--accent-green);background:rgba(62,207,142,.1);color:var(--accent-green);
+  }
+  .card-item.related{
+    color:var(--accent-green);background:rgba(62,207,142,.05);
+  }
+
+  /* ─── when focused, hide unrelated ─── */
+  body.focused .card-item:not(.selected):not(.related){display:none;}
+  body.focused .card:has(.card-item.selected),
+  body.focused .card:has(.card-item.related){opacity:1;}
+  body.focused .card:not(:has(.card-item.selected)):not(:has(.card-item.related)){opacity:.15;}
+
+  /* ─── BOTTOM CONTROLS ─── */
+  .bottom-controls{position:absolute;left:28px;bottom:24px;z-index:5;display:flex;gap:10px;}
+  .zoom-group{display:flex;background:var(--card);border:1px solid var(--card-border);border-radius:8px;overflow:hidden;}
+  .zoom-group button{
+    background:none;border:none;color:var(--text-dim);font-size:13px;padding:8px 12px;cursor:pointer;
+    border-right:1px solid var(--card-border);
+  }
+  .zoom-group button:last-child{border-right:none;}
+  .zoom-group button:hover{background:var(--card-hover);color:var(--text);}
+
+  /* ─── DETAIL PANEL ─── */
+  .detail-panel{
+    position:absolute;top:0;right:0;height:100%;width:340px;background:var(--card);
+    border-left:1px solid var(--card-border);z-index:8;transform:translateX(100%);
+    transition:transform .28s cubic-bezier(.4,0,.2,1);padding:22px;overflow-y:auto;
+  }
+  .detail-panel.open{transform:translateX(0);}
+  .panel-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;}
+  .panel-back{font-size:12.5px;color:var(--text-dim);cursor:pointer;display:flex;gap:4px;}
+  .panel-back:hover{color:var(--text);}
+  .panel-close{width:26px;height:26px;border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--text-dim);cursor:pointer;}
+  .panel-close:hover{background:var(--card-hover);color:var(--text);}
+  .panel-title{font-size:24px;font-weight:600;margin-bottom:3px;letter-spacing:-0.01em;}
+  .panel-subtitle{font-size:13px;color:var(--text-dim);margin-bottom:24px;}
+  .panel-section-label{font-size:10.5px;letter-spacing:.12em;color:var(--text-faint);font-weight:600;margin-bottom:14px;}
+  .conn-arrow{display:flex;align-items:center;justify-content:center;margin:10px 0;color:var(--text-faint);font-size:14px;}
+  .conn-tag{
+    display:flex;align-items:center;justify-content:center;background:var(--chip-bg);border:1px solid var(--card-border);
+    border-radius:8px;padding:8px 14px;font-size:13px;color:var(--text);cursor:pointer;width:100%;margin-bottom:2px;
+    transition:border-color .15s,color .15s;
+  }
+  .conn-tag:hover{border-color:var(--accent-green);color:var(--accent-green);}
+  .conn-quote{
+    background:var(--chip-bg);border:1px solid var(--card-border);border-radius:10px;
+    padding:12px 14px;font-size:12.5px;line-height:1.75;color:var(--text-dim);margin-bottom:10px;
+  }
+
+  ::-webkit-scrollbar{width:8px;}
+  ::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="title-block">
+      <h1>Memory Schema</h1>
+      <p>Explore extraction pipeline for <b>silver_blaze_case</b></p>
+    </div>
+    <div class="header-right">
+      <div class="pill"><span class="dot-cyan"></span>silver_blaze_case</div>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <div class="toolbar-left">
+      <div class="toolbar-pill">Episodes: <b>5</b></div>
+      <div class="toolbar-pill">Entities: <b>13</b></div>
+      <div class="toolbar-pill">Types: <b>6</b></div>
+      <div class="toolbar-pill">Communities: <b>3</b></div>
+    </div>
+    <div class="toolbar-right">
+      <div class="toolbar-pill">Re-process</div>
+    </div>
+  </div>
+
+  <div class="canvas-wrap" id="canvasWrap">
+    <div class="hint" id="hint">Click any item to trace its connections.</div>
+    <div class="focus-info" id="focusInfo">
+      <span class="lbl">Focused on <b id="focusName"></b></span>
+      <span class="clear-focus" onclick="clearFocus()">Clear focus</span>
+    </div>
+
+    <div class="canvas-scale" id="canvasScale">
+      <svg id="edges"></svg>
+      <div id="edgeLabels"></div>
+
+      <div class="columns">
+        <!-- EPISODES -->
+        <div class="column">
+          <div class="col-title">EPISODES</div>
+          <div class="card">
+            <div class="card-head">
+              <span class="dot-cyan"></span>
+              <span class="card-name">TEXT</span>
+              <span class="card-count">3</span>
+            </div>
+            <div class="card-item" data-id="ep_silver_blaze" data-group="episode" onclick="focusItem('ep_silver_blaze')">Silver Blaze</div>
+            <div class="card-item" data-id="ep_boscombe" data-group="episode" onclick="focusItem('ep_boscombe')">The Boscombe Valley Mystery</div>
+            <div class="card-item" data-id="ep_engineer" data-group="episode" onclick="focusItem('ep_engineer')">The Engineer's Thumb</div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <span class="dot-cyan"></span>
+              <span class="card-name">MESSAGE</span>
+              <span class="card-count">2</span>
+            </div>
+            <div class="card-item" data-id="ep_interview" data-group="episode" onclick="focusItem('ep_interview')">Interview with trainer</div>
+            <div class="card-item" data-id="ep_stableboy" data-group="episode" onclick="focusItem('ep_stableboy')">Stable boy testimony</div>
+          </div>
+        </div>
+
+        <!-- ENTITIES -->
+        <div class="column">
+          <div class="col-title">ENTITIES</div>
+          <div class="card">
+            <div class="card-head">
+              <span class="dot-green"></span>
+              <span class="card-name">HORSE</span>
+              <span class="card-count">3</span>
+            </div>
+            <div class="card-item" data-id="en_silver_blaze" data-group="entity" onclick="focusItem('en_silver_blaze')">Silver Blaze</div>
+            <div class="card-item" data-id="en_desborough" data-group="entity" onclick="focusItem('en_desborough')">Desborough</div>
+            <div class="card-item" data-id="en_mapleton" data-group="entity" onclick="focusItem('en_mapleton')">Mapleton horse</div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <span class="dot-green"></span>
+              <span class="card-name">ANIMAL</span>
+              <span class="card-count">3</span>
+            </div>
+            <div class="card-item" data-id="en_dog" data-group="entity" onclick="focusItem('en_dog')">dog</div>
+            <div class="card-item" data-id="en_sheep" data-group="entity" onclick="focusItem('en_sheep')">sheep flock</div>
+            <div class="card-item" data-id="en_curry" data-group="entity" onclick="focusItem('en_curry')">curry lamb</div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <span class="dot-green"></span>
+              <span class="card-name">PERSON</span>
+              <span class="card-count">5</span>
+            </div>
+            <div class="card-item" data-id="en_holmes" data-group="entity" onclick="focusItem('en_holmes')">Sherlock Holmes</div>
+            <div class="card-item" data-id="en_watson" data-group="entity" onclick="focusItem('en_watson')">Dr. Watson</div>
+            <div class="card-item" data-id="en_ross" data-group="entity" onclick="focusItem('en_ross')">Colonel Ross</div>
+            <div class="card-item" data-id="en_straker" data-group="entity" onclick="focusItem('en_straker')">John Straker</div>
+            <div class="card-item" data-id="en_simpson" data-group="entity" onclick="focusItem('en_simpson')">Fitzroy Simpson</div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <span class="dot-green"></span>
+              <span class="card-name">EVENT</span>
+              <span class="card-count">2</span>
+            </div>
+            <div class="card-item" data-id="en_wessex" data-group="entity" onclick="focusItem('en_wessex')">Wessex Cup</div>
+            <div class="card-item" data-id="en_murder" data-group="entity" onclick="focusItem('en_murder')">murder investigation</div>
+          </div>
+        </div>
+
+        <!-- TYPES -->
+        <div class="column">
+          <div class="col-title">TYPES</div>
+          <div class="card">
+            <div class="card-head">
+              <span class="dot-purple"></span>
+              <span class="card-name">ENTITYTYPE</span>
+              <span class="card-count">6</span>
+            </div>
+            <div class="card-item" data-id="ty_horse" data-group="type" onclick="focusItem('ty_horse')">horse</div>
+            <div class="card-item" data-id="ty_animal" data-group="type" onclick="focusItem('ty_animal')">animal</div>
+            <div class="card-item" data-id="ty_person" data-group="type" onclick="focusItem('ty_person')">person</div>
+            <div class="card-item" data-id="ty_event" data-group="type" onclick="focusItem('ty_event')">event</div>
+            <div class="card-item" data-id="ty_concept" data-group="type" onclick="focusItem('ty_concept')">concept</div>
+            <div class="card-item" data-id="ty_location" data-group="type" onclick="focusItem('ty_location')">location</div>
+          </div>
+        </div>
+
+        <!-- SUMMARIES (communities) -->
+        <div class="column">
+          <div class="col-title">SUMMARIES</div>
+          <div class="card">
+            <div class="card-head">
+              <span class="dot-amber"></span>
+              <span class="card-name">COMMUNITY</span>
+              <span class="card-count">3</span>
+            </div>
+            <div class="card-item" data-id="cm_racing" data-group="community" onclick="focusItem('cm_racing')">Racing Community</div>
+            <div class="card-item" data-id="cm_investigation" data-group="community" onclick="focusItem('cm_investigation')">Investigation Community</div>
+            <div class="card-item" data-id="cm_stables" data-group="community" onclick="focusItem('cm_stables')">Stables Community</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bottom-controls">
+      <div class="toolbar-pill">Transformations</div>
+      <div class="zoom-group">
+        <button onclick="zoom(-0.1)">−</button>
+        <button onclick="zoom(0.1)">+</button>
+        <button onclick="zoomFit()">Fit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DETAIL PANEL -->
+  <div class="detail-panel" id="detailPanel">
+    <div class="panel-top">
+      <div class="panel-back" id="panelBack"><span>‹</span><span id="panelBackLabel"></span></div>
+      <div class="panel-close" onclick="clearFocus()">✕</div>
+    </div>
+    <h2 class="panel-title" id="panelTitle"></h2>
+    <p class="panel-subtitle" id="panelSubtitle"></p>
+    <div class="panel-section-label">CONNECTIONS</div>
+    <div id="panelConnections"></div>
+  </div>
+
+</div>
+
+<script>
+/* ─── MOCK DATA: edges define what's connected ─── */
+
+// All items with display names and types
+const ITEMS = {
+  // episodes
+  ep_silver_blaze:  { name:'Silver Blaze',                   type:'text' },
+  ep_boscombe:      { name:'The Boscombe Valley Mystery',     type:'text' },
+  ep_engineer:      { name:"The Engineer's Thumb",            type:'text' },
+  ep_interview:     { name:'Interview with trainer',          type:'message' },
+  ep_stableboy:     { name:'Stable boy testimony',            type:'message' },
+  // entities
+  en_silver_blaze:  { name:'Silver Blaze',          type:'horse' },
+  en_desborough:    { name:'Desborough',            type:'horse' },
+  en_mapleton:      { name:'Mapleton horse',         type:'horse' },
+  en_dog:           { name:'dog',                   type:'animal' },
+  en_sheep:         { name:'sheep flock',           type:'animal' },
+  en_curry:         { name:'curry lamb',            type:'animal' },
+  en_holmes:        { name:'Sherlock Holmes',       type:'person' },
+  en_watson:        { name:'Dr. Watson',            type:'person' },
+  en_ross:          { name:'Colonel Ross',          type:'person' },
+  en_straker:       { name:'John Straker',          type:'person' },
+  en_simpson:       { name:'Fitzroy Simpson',       type:'person' },
+  en_wessex:        { name:'Wessex Cup',            type:'event' },
+  en_murder:        { name:'murder investigation',   type:'event' },
+  // types
+  ty_horse:         { name:'horse',     type:'entitytype' },
+  ty_animal:        { name:'animal',    type:'entitytype' },
+  ty_person:        { name:'person',    type:'entitytype' },
+  ty_event:         { name:'event',     type:'entitytype' },
+  ty_concept:       { name:'concept',   type:'entitytype' },
+  ty_location:      { name:'location',  type:'entitytype' },
+  // communities
+  cm_racing:        { name:'Racing Community',      type:'community' },
+  cm_investigation: { name:'Investigation Community', type:'community' },
+  cm_stables:       { name:'Stables Community',     type:'community' },
+};
+
+// Edges: [sourceId, targetId, label, color]
+const EDGE_COLOR = {
+  episode_entity: '#3ecf8e',
+  entity_type: '#a78bfa',
+  entity_community: '#f0b840',
+  entity_entity: '#38d0e0',
+};
+
+const EDGES = [
+  // episodes → entities (is_part_of)
+  ['ep_silver_blaze','en_silver_blaze','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_silver_blaze','en_dog','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_silver_blaze','en_holmes','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_silver_blaze','en_ross','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_silver_blaze','en_wessex','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_silver_blaze','en_straker','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_interview','en_straker','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_interview','en_holmes','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_stableboy','en_dog','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_stableboy','en_simpson','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_boscombe','en_holmes','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_boscombe','en_watson','is_part_of',EDGE_COLOR.episode_entity],
+  ['ep_engineer','en_holmes','is_part_of',EDGE_COLOR.episode_entity],
+
+  // entities → types (is_a)
+  ['en_silver_blaze','ty_horse','is_a',EDGE_COLOR.entity_type],
+  ['en_desborough','ty_horse','is_a',EDGE_COLOR.entity_type],
+  ['en_mapleton','ty_horse','is_a',EDGE_COLOR.entity_type],
+  ['en_dog','ty_animal','is_a',EDGE_COLOR.entity_type],
+  ['en_sheep','ty_animal','is_a',EDGE_COLOR.entity_type],
+  ['en_curry','ty_animal','is_a',EDGE_COLOR.entity_type],
+  ['en_holmes','ty_person','is_a',EDGE_COLOR.entity_type],
+  ['en_watson','ty_person','is_a',EDGE_COLOR.entity_type],
+  ['en_ross','ty_person','is_a',EDGE_COLOR.entity_type],
+  ['en_straker','ty_person','is_a',EDGE_COLOR.entity_type],
+  ['en_simpson','ty_person','is_a',EDGE_COLOR.entity_type],
+  ['en_wessex','ty_event','is_a',EDGE_COLOR.entity_type],
+  ['en_murder','ty_event','is_a',EDGE_COLOR.entity_type],
+
+  // entities → communities (has_member)
+  ['en_silver_blaze','cm_racing','has_member',EDGE_COLOR.entity_community],
+  ['en_desborough','cm_racing','has_member',EDGE_COLOR.entity_community],
+  ['en_wessex','cm_racing','has_member',EDGE_COLOR.entity_community],
+  ['en_holmes','cm_investigation','has_member',EDGE_COLOR.entity_community],
+  ['en_watson','cm_investigation','has_member',EDGE_COLOR.entity_community],
+  ['en_ross','cm_investigation','has_member',EDGE_COLOR.entity_community],
+  ['en_straker','cm_investigation','has_member',EDGE_COLOR.entity_community],
+  ['en_dog','cm_stables','has_member',EDGE_COLOR.entity_community],
+  ['en_sheep','cm_stables','has_member',EDGE_COLOR.entity_community],
+  ['en_simpson','cm_stables','has_member',EDGE_COLOR.entity_community],
+
+  // entities → entities (relationships)
+  ['en_silver_blaze','en_wessex','won',EDGE_COLOR.entity_entity],
+  ['en_silver_blaze','en_straker','owned_by',EDGE_COLOR.entity_entity],
+  ['en_desborough','en_wessex','competed_in',EDGE_COLOR.entity_entity],
+  ['en_dog','en_holmes','guarded_by',EDGE_COLOR.entity_entity],
+  ['en_curry','en_dog','masked_scent_of',EDGE_COLOR.entity_entity],
+  ['en_simpson','en_dog','suspected_of_bribing',EDGE_COLOR.entity_entity],
+  ['en_straker','en_simpson','confronted',EDGE_COLOR.entity_entity],
+  ['en_holmes','en_watson','partner_of',EDGE_COLOR.entity_entity],
+  ['en_holmes','en_ross','hired_by',EDGE_COLOR.entity_entity],
+];
+
+// Detail panel connections (by item id)
+const DETAILS = {
+  en_dog: {
+    name:'dog', type:'animal', parent:'animal',
+    connections:[
+      {dir:'forward',kind:'tag',text:'animal'},
+      {dir:'forward',kind:'tag',text:'Stables Community'},
+      {dir:'backward',kind:'tag',text:'Silver Blaze'},
+      {dir:'backward',kind:'tag',text:'Sherlock Holmes'},
+      {dir:'backward',kind:'quote',text:'The dog did not bark in the nighttime, proving the intruder was someone the dog knew well.'},
+      {dir:'backward',kind:'tag',text:'curry lamb'},
+      {dir:'backward',kind:'quote',text:'Curry was used to mask the scent of the sedative given to the stable dog.'},
+      {dir:'backward',kind:'tag',text:'Fitzroy Simpson'},
+    ]
+  },
+  en_silver_blaze: {
+    name:'Silver Blaze', type:'horse', parent:'horse',
+    connections:[
+      {dir:'forward',kind:'tag',text:'horse'},
+      {dir:'forward',kind:'tag',text:'Racing Community'},
+      {dir:'forward',kind:'tag',text:'Wessex Cup'},
+      {dir:'forward',kind:'quote',text:'Silver Blaze won the Wessex Cup, the favorite racehorse of Colonel Ross.'},
+      {dir:'backward',kind:'tag',text:'Silver Blaze'},
+      {dir:'backward',kind:'tag',text:'John Straker'},
+    ]
+  },
+  en_holmes: {
+    name:'Sherlock Holmes', type:'person', parent:'person',
+    connections:[
+      {dir:'forward',kind:'tag',text:'person'},
+      {dir:'forward',kind:'tag',text:'Investigation Community'},
+      {dir:'backward',kind:'tag',text:'Silver Blaze'},
+      {dir:'backward',kind:'tag',text:'The Boscombe Valley Mystery'},
+      {dir:'backward',kind:'tag',text:"The Engineer's Thumb"},
+      {dir:'backward',kind:'tag',text:'Dr. Watson'},
+      {dir:'backward',kind:'quote',text:'Holmes and Watson were partners in all investigations, sharing insights and evidence.'},
+      {dir:'backward',kind:'tag',text:'Colonel Ross'},
+      {dir:'backward',kind:'quote',text:'Colonel Ross hired Holmes to find the missing racehorse Silver Blaze.'},
+    ]
+  },
+  // default for items without explicit details
+};
+
+function defaultDetail(id) {
+  const item = ITEMS[id];
+  if (!item) return null;
+  return {
+    name: item.name,
+    type: item.type,
+    parent: item.type,
+    connections: []
+  };
+}
+
+/* ─── FOCUS LOGIC ─── */
+
+let focusedId = null;
+let scale = 1;
+
+function getNeighbors(id) {
+  const neighbors = new Set();
+  for (const [src, tgt] of EDGES) {
+    if (src === id) neighbors.add(tgt);
+    if (tgt === id) neighbors.add(src);
+  }
+  return neighbors;
+}
+
+function getEdgesFor(id) {
+  return EDGES.filter(([src, tgt]) => src === id || tgt === id);
+}
+
+function focusItem(id) {
+  focusedId = id;
+  document.body.classList.add('focused');
+
+  // hide hint, show focus info
+  document.getElementById('hint').style.opacity = '0';
+  const fi = document.getElementById('focusInfo');
+  fi.classList.add('show');
+  document.getElementById('focusName').textContent = ITEMS[id]?.name || id;
+
+  // mark selected + related
+  document.querySelectorAll('.card-item').forEach(el => {
+    el.classList.remove('selected','related');
+  });
+  const selectedEl = document.querySelector(`[data-id="${id}"]`);
+  if (selectedEl) selectedEl.classList.add('selected');
+
+  const neighbors = getNeighbors(id);
+  neighbors.forEach(nid => {
+    const el = document.querySelector(`[data-id="${nid}"]`);
+    if (el) el.classList.add('related');
+  });
+
+  // draw edges
+  drawEdges(id);
+
+  // open detail panel
+  renderPanel(id);
+  document.getElementById('detailPanel').classList.add('open');
+}
+
+function clearFocus() {
+  focusedId = null;
+  document.body.classList.remove('focused');
+  document.getElementById('hint').style.opacity = '1';
+  document.getElementById('focusInfo').classList.remove('show');
+  document.querySelectorAll('.card-item').forEach(el => {
+    el.classList.remove('selected','related');
+  });
+  // clear svg
+  document.getElementById('edges').innerHTML = '';
+  document.getElementById('edgeLabels').innerHTML = '';
+  document.getElementById('detailPanel').classList.remove('open');
+}
+
+function drawEdges(id) {
+  const svg = document.getElementById('edges');
+  const labelWrap = document.getElementById('edgeLabels');
+  svg.innerHTML = '';
+  labelWrap.innerHTML = '';
+  const wrapRect = document.getElementById('canvasScale').getBoundingClientRect();
+
+  const relevantEdges = getEdgesFor(id);
+  const colorMap = {
+    [EDGE_COLOR.episode_entity]: '#3ecf8e',
+    [EDGE_COLOR.entity_type]: '#a78bfa',
+    [EDGE_COLOR.entity_community]: '#f0b840',
+    [EDGE_COLOR.entity_entity]: '#38d0e0',
+  };
+
+  relevantEdges.forEach(([srcId, tgtId, label, color]) => {
+    const srcEl = document.querySelector(`[data-id="${srcId}"]`);
+    const tgtEl = document.querySelector(`[data-id="${tgtId}"]`);
+    if (!srcEl || !tgtEl) return;
+    if (srcEl.style.display === 'none' || tgtEl.style.display === 'none') return;
+
+    // Wait a tick for display to update
+    const sr = srcEl.getBoundingClientRect();
+    const tr = tgtEl.getBoundingClientRect();
+
+    // Determine direction (left to right based on column order)
+    const fromRight = sr.left > tr.left;
+    const x1 = (fromRight ? sr.left : sr.right) - wrapRect.left;
+    const y1 = sr.top + sr.height/2 - wrapRect.top;
+    const x2 = (fromRight ? tr.right : tr.left) - wrapRect.left;
+    const y2 = tr.top + tr.height/2 - wrapRect.top;
+
+    const dx = Math.max(30, Math.abs(x2 - x1) * 0.4);
+    const d = `M ${x1} ${y1} C ${x1 + (fromRight ? -dx : dx)} ${y1}, ${x2 + (fromRight ? dx : -dx)} ${y2}, ${x2} ${y2}`;
+
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d', d);
+    path.setAttribute('class','edge-path');
+    path.setAttribute('stroke', color);
+    svg.appendChild(path);
+
+    const lbl = document.createElement('div');
+    lbl.className = 'edge-label';
+    lbl.textContent = label;
+    lbl.style.left = ((x1+x2)/2) + 'px';
+    lbl.style.top = ((y1+y2)/2) + 'px';
+    lbl.style.borderColor = color + '44';
+    labelWrap.appendChild(lbl);
+  });
+}
+
+function renderPanel(id) {
+  const detail = DETAILS[id] || defaultDetail(id);
+  if (!detail) return;
+
+  document.getElementById('panelTitle').textContent = detail.name;
+  document.getElementById('panelSubtitle').textContent = detail.type;
+  document.getElementById('panelBackLabel').textContent = detail.parent || detail.type;
+
+  const wrap = document.getElementById('panelConnections');
+  wrap.innerHTML = '';
+
+  if (detail.connections.length === 0) {
+    wrap.innerHTML = '<div style="color:var(--text-faint);font-size:12px;text-align:center;padding:20px;">No connections found</div>';
+    return;
+  }
+
+  detail.connections.forEach(c => {
+    if (c.dir === 'forward' || c.dir === 'backward') {
+      const arrow = document.createElement('div');
+      arrow.className = 'conn-arrow';
+      arrow.textContent = c.dir === 'forward' ? '→' : '←';
+      wrap.appendChild(arrow);
+    }
+    if (c.kind === 'tag') {
+      const tag = document.createElement('div');
+      tag.className = 'conn-tag';
+      tag.textContent = c.text;
+      // click to find and focus matching item
+      tag.onclick = () => {
+        const match = Object.entries(ITEMS).find(([_,v]) => v.name === c.text);
+        if (match) focusItem(match[0]);
+      };
+      wrap.appendChild(tag);
+    } else if (c.kind === 'quote') {
+      const q = document.createElement('div');
+      q.className = 'conn-quote';
+      q.textContent = c.text;
+      wrap.appendChild(q);
+    }
+  });
+}
+
+/* ─── ZOOM ─── */
+function zoom(delta) {
+  scale = Math.min(1.6, Math.max(0.5, scale + delta));
+  document.getElementById('canvasScale').style.transform = `scale(${scale})`;
+  if (focusedId) {
+    setTimeout(() => drawEdges(focusedId), 50);
+  }
+}
+function zoomFit() {
+  scale = 1;
+  document.getElementById('canvasScale').style.transform = 'scale(1)';
+  if (focusedId) {
+    setTimeout(() => drawEdges(focusedId), 50);
+  }
+}
+
+/* ─── CLICK BLANK TO CLEAR ─── */
+document.getElementById('canvasWrap').addEventListener('click', (e) => {
+  if (e.target.closest('.card-item') || e.target.closest('.detail-panel') || e.target.closest('.bottom-controls')) return;
+  clearFocus();
+});
+
+/* ─── REDRAW ON RESIZE ─── */
+window.addEventListener('resize', () => {
+  if (focusedId) drawEdges(focusedId);
+});
+</script>
+</body>
+</html>
