@@ -12,6 +12,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
+// Built-in entity type candidates (mirrors server DEFAULT_ENTITY_TYPES)
+const ENTITY_TYPE_CANDIDATES = [
+  'Person',
+  'Organization',
+  'Location',
+  'Object',
+  'Document',
+  'Event',
+  'Topic',
+];
+
 interface NodeData {
   uuid: string;
   name: string;
@@ -63,6 +74,22 @@ export function NodeEditDialog({
     onOpenChange(false);
   };
 
+  const toggleCandidate = (candidate: string) => {
+    const current = labels.split(',').map((l) => l.trim()).filter(Boolean);
+    const idx = current.indexOf(candidate);
+    if (idx >= 0) {
+      current.splice(idx, 1);
+    } else {
+      current.push(candidate);
+    }
+    setLabels(current.join(', '));
+  };
+
+  const isCandidateActive = (candidate: string) => {
+    const current = labels.split(',').map((l) => l.trim()).filter(Boolean);
+    return current.includes(candidate);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -92,6 +119,24 @@ export function NodeEditDialog({
               placeholder="Person, CEO"
               className="h-8 text-sm"
             />
+            {/* Type candidates */}
+            <div className="flex flex-wrap gap-1 pt-1">
+              {ENTITY_TYPE_CANDIDATES.map((candidate) => (
+                <button
+                  key={candidate}
+                  type="button"
+                  onClick={() => toggleCandidate(candidate)}
+                  className={
+                    'rounded-full border px-2 py-0.5 text-xs transition-colors ' +
+                    (isCandidateActive(candidate)
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-muted-foreground/30 text-muted-foreground hover:border-primary/50')
+                  }
+                >
+                  {candidate}
+                </button>
+              ))}
+            </div>
           </div>
 
           <div className="space-y-1.5">

@@ -34,9 +34,17 @@ async def _resolve_schema_params(schema_id: int | None):
     """Resolve a schema_id into Graphiti extraction parameters.
 
     Returns (entity_types, edge_types, custom_extraction_instructions).
+
+    - When ``schema_id`` is None → returns DEFAULT_ENTITY_TYPES so that
+      extraction produces specific labels (Person, Organization, …) instead
+      of generic ``['Entity']``.
+    - When the schema exists but has empty ``entity_types`` → falls back to
+      DEFAULT_ENTITY_TYPES to avoid all-``['Entity']`` results.
     """
+    from graph_service.models import DEFAULT_ENTITY_TYPES
+
     if schema_id is None:
-        return None, None, None
+        return DEFAULT_ENTITY_TYPES, None, None
 
     from graph_service.config import get_settings
     from graph_service.models import build_extraction_params, get_schema
@@ -44,9 +52,13 @@ async def _resolve_schema_params(schema_id: int | None):
     settings = get_settings()
     schema = await get_schema(settings.postgres_age_dsn, schema_id)
     if not schema:
-        return None, None, None
+        return DEFAULT_ENTITY_TYPES, None, None
 
-    return build_extraction_params(schema)
+    entity_types, edge_types, custom_instructions = build_extraction_params(schema)
+    if not entity_types:
+        entity_types = DEFAULT_ENTITY_TYPES
+
+    return entity_types, edge_types, custom_instructions
 
 
 async def _update_schema_type_mapping_from_edges(

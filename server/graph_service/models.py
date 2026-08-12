@@ -195,3 +195,47 @@ def build_extraction_params(
 
     custom_instructions = schema.get('custom_instructions') or None
     return entity_types, edge_types, custom_instructions
+
+
+# ---------------------------------------------------------------------------
+# Built-in default entity types (used when no schema is selected)
+# ---------------------------------------------------------------------------
+
+
+class Person(BaseModel):
+    """A Person represents a named or clearly identifiable individual."""
+
+
+class Organization(BaseModel):
+    """An Organization represents a company, institution, team, or association."""
+
+
+class Location(BaseModel):
+    """A Location represents a physical or virtual place."""
+
+
+class Object(BaseModel):
+    """An Object represents a physical item, tool, device, or possession."""
+
+
+class Document(BaseModel):
+    """A Document represents information content such as reports, articles, emails, videos, or podcasts."""
+
+
+class Event(BaseModel):
+    """An Event represents a named or time-bound occurrence."""
+
+
+class Topic(BaseModel):
+    """A Topic represents a subject, hobby, or knowledge domain."""
+
+
+DEFAULT_ENTITY_TYPES: dict[str, type[BaseModel]] = {
+    'Person': Person,
+    'Organization': Organization,
+    'Location': Location,
+    'Object': Object,
+    'Document': Document,
+    'Event': Event,
+    'Topic': Topic,
+}

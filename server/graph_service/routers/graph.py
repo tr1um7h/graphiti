@@ -486,7 +486,13 @@ async def get_memory_schema(
     episodes_result, _, _ = await driver.execute_query(
         f"""
         SELECT source,
-               jsonb_agg(jsonb_build_object('id', uuid, 'label', name)) as items,
+               jsonb_agg(
+                   jsonb_build_object(
+                       'id', uuid,
+                       'label', COALESCE(NULLIF(left(content, 80), ''), name),
+                       'name', name
+                   )
+               ) as items,
                COUNT(*) as count
         FROM episodic_nodes
         WHERE {gid_filter}
@@ -517,49 +523,70 @@ async def get_memory_schema(
             }
         )
 
-    # --- 2. Entities grouped by label ----------------------------------------
+    # --- 2. Entities grouped by specific label --------------------------------
     entities_result, _, _ = await driver.execute_query(
         f"""
-        SELECT label,
-               jsonb_agg(jsonb_build_object('id', uuid, 'label', name)) as items,
-               COUNT(*) as count
-        FROM (
-            SELECT uuid, name, UNNEST(labels) as label
-            FROM entity_nodes
-            WHERE {gid_filter}
-        ) expanded
-        GROUP BY label ORDER BY count DESC
+        SELECT uuid, name, labels
+        FROM entity_nodes
+        WHERE {gid_filter}
         """,
         params={'group_id': group_id},
     )
 
     entity_cards: list[dict] = []
-    # uuid -> set of labels (all labels, not just first)
+    # uuid -> set of *specific* labels (excluding 'Entity')
     entity_uuid_to_labels: dict[str, set[str]] = {}
     entity_uuid_to_name: dict[str, str] = {}
+    # Collect specific labels per entity, track which entities have only 'Entity'
+    fallback_uuids: set[str] = set()
+    specific_label_counts: dict[str, int] = {}
+    specific_label_items: dict[str, list[dict]] = {}
+
     for record in entities_result or []:
-        label = record.get('label', 'Unknown')
-        items = record.get('items', [])
-        if isinstance(items, str):
-            try:
-                items = json.loads(items)
-            except (json.JSONDecodeError, TypeError):
-                items = []
+        uid = record.get('uuid', '')
+        name = record.get('name', '')
+        labels = record.get('labels', [])
+        if isinstance(labels, str):
+            labels = [labels] if labels else []
+        if not uid:
+            continue
+
+        entity_uuid_to_name[uid] = name
+        specific = set(labels) - {'Entity'}
+        entity_uuid_to_labels[uid] = specific
+
+        if specific:
+            for lbl in specific:
+                specific_label_counts[lbl] = specific_label_counts.get(lbl, 0) + 1
+                specific_label_items.setdefault(lbl, []).append({'id': uid, 'label': name})
+        else:
+            # Only ['Entity'] → fallback
+            fallback_uuids.add(uid)
+
+    # Build cards for specific labels (sorted by count desc)
+    for lbl in sorted(specific_label_counts, key=lambda x: -specific_label_counts[x]):
         entity_cards.append(
             {
-                'id': f'label:{label}',
-                'title': label.upper(),
+                'id': f'label:{lbl}',
+                'title': lbl.upper(),
                 'color': COLOR_ENTITY,
-                'items': items,
+                'items': specific_label_items[lbl],
             }
         )
-        for item in items:
-            uid = item.get('id', '')
-            if uid:
-                entity_uuid_to_name[uid] = item.get('label', '')
-                entity_uuid_to_labels.setdefault(uid, set()).add(label)
 
-    # --- 3. Types: single card with all label names --------------------------
+    # Fallback card for entities with only ['Entity']
+    if fallback_uuids:
+        fallback_items = [{'id': uid, 'label': entity_uuid_to_name.get(uid, '')} for uid in fallback_uuids]
+        entity_cards.append(
+            {
+                'id': 'label:Entity',
+                'title': 'ENTITY',
+                'color': COLOR_ENTITY,
+                'items': fallback_items,
+            }
+        )
+
+    # --- 3. Types: single card with specific label names (no 'Entity') --------
     all_labels = sorted({lbl for labels in entity_uuid_to_labels.values() for lbl in labels})
     type_items = [{'id': f'type:{lbl}', 'label': lbl} for lbl in all_labels]
 
