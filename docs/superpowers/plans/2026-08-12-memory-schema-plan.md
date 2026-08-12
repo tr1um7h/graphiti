@@ -1606,3 +1606,222 @@ Should show `source_types` and `target_types` populated.
 - [ ] "+ 新建" links to `/settings/schemas/new`
 - [ ] Backend saves `source_types`/`target_types` during extraction
 - [ ] Old schemas without new fields still work (backward compatible)
+
+---
+
+## Entity Classification Implementation Plan
+
+> 对应设计：`docs/superpowers/specs/2026-08-12-memory-schema-design.md` 的 Entity Classification 补充设计。
+
+**Goal:** 让未选择自定义 schema 的实体提取默认产出 Person、Organization、Location、Object、Document、Event、Topic 等具体 labels，并让 Memory Schema 按这些具体类型分组展示。
+
+**Feasibility:** 改动整体容易实现，核心链路已经存在，不需要数据库迁移，也不需要改 LLM 输出 schema。主要工作量集中在“默认类型注入”和“Memory Schema 对 `Entity` 的过滤”。真正需要额外控制风险的是存量数据回填和 LLM 分类质量。
+
+### 实现任务
+
+#### Task 1: 新增内置默认实体类型
+
+**Files:**
+- Modify: `server/graph_service/models.py`
+
+**Step 1: 新增 `DEFAULT_ENTITY_TYPES`**
+
+在 `server/graph_service/models.py` 中定义一组 Pydantic 模型，docstring 作为 LLM 分类描述。`Entity` 不需要加入，因为 Graphiti 的 `_build_entity_types_context()` 始终会把 `Entity` 作为 id 0 保留。
+
+```python
+class Person(BaseModel):
+    """A Person represents a named or clearly identifiable individual."""
+
+
+class Organization(BaseModel):
+    """An Organization represents a company, institution, team, or association."""
+
+
+class Location(BaseModel):
+    """A Location represents a physical or virtual place."""
+
+
+class Object(BaseModel):
+    """An Object represents a physical item, tool, device, or possession."""
+
+
+class Document(BaseModel):
+    """A Document represents information content such as reports, articles, emails, videos, or podcasts."""
+
+
+class Event(BaseModel):
+    """An Event represents a named or time-bound occurrence."""
+
+
+class Topic(BaseModel):
+    """A Topic represents a subject, hobby, or knowledge domain."""
+
+
+DEFAULT_ENTITY_TYPES: dict[str, type[BaseModel]] = {
+    'Person': Person,
+    'Organization': Organization,
+    'Location': Location,
+    'Object': Object,
+    'Document': Document,
+    'Event': Event,
+    'Topic': Topic,
+}
+```
+
+v1 默认类型不配置 attributes，避免触发额外 attribute extraction；分类描述放在 docstring 即可。
+
+**Step 2: Commit**
+
+```bash
+git add server/graph_service/models.py
+git commit -m "feat: add default entity types for extraction"
+```
+
+---
+
+#### Task 2: 未选择 schema 时注入默认分类
+
+**Files:**
+- Modify: `server/graph_service/routers/ingest.py`
+
+**Step 1: 修改 `_resolve_schema_params()`**
+
+当 `schema_id is None` 时返回默认类型；当用户选择了 schema 但 `entity_types` 为空时也回退到默认类型，避免再次出现全部 `['Entity']` 的结果。
+
+```python
+async def _resolve_schema_params(schema_id: int | None):
+    if schema_id is None:
+        return DEFAULT_ENTITY_TYPES, None, None
+
+    from graph_service.config import get_settings
+    from graph_service.models import build_extraction_params, get_schema
+
+    settings = get_settings()
+    schema = await get_schema(settings.postgres_age_dsn, schema_id)
+    if not schema:
+        return DEFAULT_ENTITY_TYPES, None, None
+
+    entity_types, edge_types, custom_instructions = build_extraction_params(schema)
+    if not entity_types:
+        entity_types = DEFAULT_ENTITY_TYPES
+
+    return entity_types, edge_types, custom_instructions
+```
+
+该 helper 同时覆盖 `add_episode` 和 `preview_memory`，无需在每条 ingestion 路由重复改动。
+
+**Step 2: Commit**
+
+```bash
+git add server/graph_service/routers/ingest.py
+git commit -m "feat: inject default entity types when schema is empty"
+```
+
+---
+
+#### Task 3: Memory Schema 按具体类型分组
+
+**Files:**
+- Modify: `server/graph_service/routers/graph.py`
+
+**Step 1: 过滤 `Entity` 常规分组**
+
+在 `GET /rest/memory-schema` 的实体卡片构建逻辑中，改为读取完整 `labels` 后在 Python 内分组：
+
+- 每个实体的具体 labels = `labels - {'Entity'}`
+- 有具体 labels 的实体只进入对应具体类型卡
+- 没有具体 labels 的实体进入 `ENTITY` 兜底卡
+- TYPES 列只列出具体 labels，不列出 `Entity`
+- Detail Panel 仍可保留完整 labels 作为 type tag
+
+这样 `['Entity', 'Person']` 只出现在 PERSON 卡，`['Entity']` 出现在 ENTITY 兜底卡。
+
+**Step 2: Commit**
+
+```bash
+git add server/graph_service/routers/graph.py
+git commit -m "feat: group memory schema entities by specific labels"
+```
+
+---
+
+#### Task 4: 节点编辑入口支持类型选择
+
+**Files:**
+- Modify: `web_service/components/ingest/node-edit-dialog.tsx`
+
+**Step 1: 将 labels 输入从自由文本升级为可选项**
+
+保留手动输入能力，但提供默认类型候选，降低用户手写 typo 概率。可选实现，不阻塞核心分类链路。
+
+**Step 2: Commit**
+
+```bash
+git add web_service/components/ingest/node-edit-dialog.tsx
+git commit -m "feat: add entity type suggestions to node edit dialog"
+```
+
+---
+
+#### Task 5: 存量数据回填（独立任务）
+
+**Files:**
+- Create: `server/graph_service/scripts/backfill_entity_types.py`（如不存在 scripts 目录则创建）
+
+**Step 1: 实现一次性回填脚本**
+
+1. 查询 `labels = ['Entity']` 的实体。
+2. 按批读取 `name`、`summary`、`attributes`。
+3. 调用 LLM，使用 `DEFAULT_ENTITY_TYPES` 或指定 schema 分类。
+4. 保留 UUID、embedding、关系、summary，只更新 `labels`。
+5. 支持 `--group-id`、`--schema-id`、`--limit`、`--dry-run`。
+
+回填脚本不接入常规 extraction 流程，由运维或开发显式执行。
+
+**Step 2: Commit**
+
+```bash
+git add server/graph_service/scripts/backfill_entity_types.py
+git commit -m "feat: add one-off entity type backfill script"
+```
+
+---
+
+#### Task 6: 测试与验证
+
+**Files:**
+- Create: `server/tests/test_entity_classification.py`
+
+**Step 1: 添加单元测试**
+
+- `schema_id=None` 时返回 `DEFAULT_ENTITY_TYPES`
+- schema 存在但 `entity_types=[]` 时回退默认类型
+- 自定义 schema 优先于默认类型
+- Memory Schema 分组逻辑对 `['Entity', 'Person']` 只生成 PERSON 卡
+- 仅有 `['Entity']` 的节点生成 ENTITY 兜底卡
+
+**Step 2: 端到端验证**
+
+- 无 schema 导入一段含人物、组织、地点的内容
+- 查询 `entity_nodes.labels`，确认不再全部是 `['Entity']`
+- 打开 `/memory-schema`，确认出现多张具体类型卡
+- 确认没有重复的 ENTITY 卡
+
+**Step 3: Commit**
+
+```bash
+git add server/tests/test_entity_classification.py
+git commit -m "test: cover default entity type injection and grouping"
+```
+
+---
+
+### 验收清单
+
+- [ ] 无 schema 时提取节点包含具体 labels
+- [ ] 自定义 schema 优先于默认分类
+- [ ] 空 schema 回退到默认分类
+- [ ] Memory Schema 按具体类型生成多张卡
+- [ ] `Entity` 不作为常规分组，仅作为兜底卡
+- [ ] 存量数据回填脚本支持 dry-run 和批量执行
+- [ ] 相关单元测试通过

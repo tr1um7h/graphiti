@@ -41,6 +41,8 @@ EPISODES ──→ ENTITIES ──→ TYPES
 
 7 个 Animal + 6 个 Horse → 2 张卡：`ANIMAL (7)` 和 `HORSE (6)`，卡内列出实体名称。**多 label 实体在所有 label 下都出现**（实体有 `['Person','Employee']` → 同时出现在 Person 卡和 Employee 卡中）。
 
+**`Entity` 是每个实体都会保留的基础标签，不作为常规分组**。只有没有其他具体 label 的实体才显示在 `ENTITY` 兜底卡中；已有具体分类的实体不要重复出现在 `ENTITY` 卡里。
+
 **3. TYPES 是单张卡片，所有类型名为 items**
 
 参照 demo 的 `ENTITYTYPE (13)` 卡。不是每个类型一张空卡。这样用户能看到所有类型一览，点击某个 type 可以跳转到 ENTITIES 列对应的 label 卡。
@@ -179,7 +181,7 @@ Panel 内的 tag（如 `→ animal`、`← sherlock holmes`）可点击 → 切�
 
 1. **后端**：`curl /rest/memory-schema?group_id=xxx | jq` 返回非空数据，4 列都有内容
 2. **EPISODES**：按 source 分组，不是每条一张卡
-3. **ENTITIES**：按 label 分组，多 label 实体出现在多张卡中
+3. **ENTITIES**：按 label 分组，多 label 实体出现在多张卡中，且 `Entity` 不作为常规分组
 4. **TYPES**：单张卡片，所有类型名为可点击 items
 5. **SUMMARIES**：来自 `community_nodes`，不是 entity 的 summary 字段
 6. **默认无连线**：Overview 状态下画布只有卡片和 items，无 SVG 连线
@@ -187,3 +189,88 @@ Panel 内的 tag（如 `→ animal`、`← sherlock holmes`）可点击 → 切�
 8. **Detail Panel**：按实体 UUID 查到 connections，tag 可点击跳转并联动画布
 9. **Clear focus**：点击 Clear 或空白区域 → 隐藏连线 + 恢复所有 items → 回到 Overview
 10. **空数据**：group_id 无数据时显示明确提示，不是空白页
+
+---
+
+## Entity Classification（实体分类补充设计）
+
+### 背景
+
+当前数据库中的实体普遍是 `['Entity']`，缺少 Person、Location、Organization、Object、Document、Event 等细粒度分类。根因不是实体模型没有分类字段，而是服务端在未选择 extraction schema 时没有向 LLM 注入具体 `entity_types`，导致提取流程只能使用默认的 `Entity` 类型。
+
+现有代码已经具备分类基础：
+
+- `EntityNode.labels` 保存实体类型，Postgres AGE 写入时保留 `Entity` 并合并其他 labels
+- `ExtractedEntity.entity_type_id` 已要求 LLM 输出类型 ID
+- `_build_entity_types_context()` 会根据 `entity_types` 生成类型列表
+- `_create_entity_nodes()` 会把分类写为 `['Entity', '<specific_type>']`
+- `extraction_schemas.entity_types` JSONB 已支持自定义实体类型
+- Memory Schema 的 ENTITIES 列已按 labels 分组
+
+### 设计决策
+
+1. **不新增 `entity_nodes.entity_type` 列**。`labels` 是实体类型的唯一事实来源；新增列会引入双写、迁移和跨数据库驱动同步成本。
+2. **不修改 `extraction_schemas` 表结构**。现有 `entity_types` / `edge_types` / `custom_instructions` 已满足需求。
+3. **不修改 LLM 输出 schema**。`ExtractedEntity.entity_type_id` 已存在，只需传入类型定义。
+4. **LLM 自动分类为主，手动修正为辅**。提取时由 LLM 给出一个主类型；用户可在节点编辑中手动补充或修正 labels。
+5. **未选择 schema 时注入内置默认分类**；选择自定义 schema 时优先使用自定义 `entity_types`。
+6. **`Entity` 是兜底类型**。Memory Schema 不把它作为常规卡片，只有无具体分类的实体才显示在 `ENTITY` 卡中。
+
+### 默认分类
+
+建议内置以下通用分类：
+
+| 类型 | 定义 | 典型示例 |
+|------|------|---------|
+| `Person` | 可明确指代的个人 | Jordan Lee、Nisha、Dr. Amara Osei |
+| `Organization` | 公司、机构、团队、协会 | Acme Corp、Lockheed Martin、AAN |
+| `Location` | 物理或虚拟地点 | Denver、Riverside Park、Belmont Arts Center |
+| `Object` | 物理物品、工具、设备、所有物 | Gamecube、Ford Mustang、wool coat |
+| `Document` | 文章、报告、邮件、视频、播客等信息内容 | Q3 report、API design doc |
+| `Event` | 有名称或时间边界的事件 | product launch、onboarding session |
+| `Topic` | 主题、爱好、知识领域 | road cycling、ceramics、machine learning |
+| `Entity` | 兜底，仅无法归入上述类型时使用 | 其他可唯一识别的具体实体 |
+
+`Project`、`Product`、`Preference` 等更适合作为领域自定义类型，不放进通用默认集，避免分类过散导致 LLM 误判。
+
+### 提取链路
+
+1. `server/graph_service/routers/ingest.py::_resolve_schema_params(None)` 返回内置 `DEFAULT_ENTITY_TYPES`，而不是 `(None, None, None)`。
+2. 用户选择自定义 schema 时，仍从 `extraction_schemas` 读取并构建 Pydantic `entity_types`。
+3. Graphiti 将默认类型或自定义类型注入 `entity_types_context`，LLM 为每个实体输出 `entity_type_id`。
+4. `_create_entity_nodes()` 写入 `labels = ['Entity', '<specific_type>']`。
+5. 去重/合并逻辑已支持从泛化节点提升到具体类型，无需额外改造。
+
+### 前端与 API
+
+- `GET /rest/memory-schema` 继续按 labels 分组，但过滤掉常规 `Entity` 标签。
+- 只有 `labels == ['Entity']` 的节点进入 `ENTITY` 兜底卡。
+- TYPES 列不展示 `Entity`，避免类型列表被基础标签占满。
+- 节点编辑入口保留 labels 修改能力；后续可将逗号文本升级为分类选择器。
+
+### 存量数据回填
+
+存量 `['Entity']` 数据需要一次性回填：
+
+1. 读取存量节点 `name`、`summary`、`attributes`。
+2. 使用 LLM 按默认分类或所选 schema 输出具体类型。
+3. 保留节点 UUID、embedding、关系和原始 summary，仅更新 `labels`。
+4. 回填后可重新生成 Memory Schema 卡片分组。
+
+回填应作为一次性维护任务，不随每次提取自动执行。
+
+### 实施范围
+
+- `server/graph_service/models.py`：新增 `DEFAULT_ENTITY_TYPES`
+- `server/graph_service/routers/ingest.py`：`_resolve_schema_params()` 使用默认类型
+- `server/graph_service/routers/graph.py`：Memory Schema 过滤 `Entity` 常规分组
+- `web_service/components/ingest/node-edit-dialog.tsx`：可选升级为类型选择器
+- 新增/补充测试：默认 schema 注入、提取 labels、Memory Schema 分组
+
+### 验证
+
+1. `schema_id=None` 时提取出的实体 labels 包含具体类型，不再全部是 `['Entity']`
+2. 自定义 schema 优先于内置默认分类
+3. Memory Schema 按 Person / Organization / Location / Object / Document / Event / Topic 生成多张卡
+4. `['Entity', 'Person']` 只出现在 PERSON 卡，不重复出现在 ENTITY 卡
+5. 仅有 `['Entity']` 的存量节点出现在 ENTITY 兜底卡
