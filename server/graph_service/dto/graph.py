@@ -91,6 +91,8 @@ class TimelineItem(BaseModel):
     description: str = Field(..., description='Activity description')
     source: str = Field(default='', description='Source information')
     time: str = Field(..., description='ISO format timestamp')
+    content: str = Field(default='', description='Episode content')
+    entity_edges: list[str] = Field(default_factory=list, description='Entity edge UUIDs')
 
 
 class EntityDetailResponse(BaseModel):

@@ -113,3 +113,5 @@ docstring-code-format = true
 include = ["graphiti_core", "server"]
 pythonVersion = "3.10"
 typeCheckingMode = "basic"
+venvPath = "server"
+venv = ".venv"

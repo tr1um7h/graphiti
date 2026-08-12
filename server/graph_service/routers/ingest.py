@@ -23,6 +23,7 @@ from graph_service.zep_graphiti import ZepGraphitiDep
 
 try:
     from opentelemetry import context as otel_context
+    from opentelemetry.context import Context
 
     OTEL_AVAILABLE = True
 except ImportError:
@@ -48,6 +49,59 @@ async def _resolve_schema_params(schema_id: int | None):
     return build_extraction_params(schema)
 
 
+async def _update_schema_type_mapping_from_edges(
+    schema_id: int,
+    edges_data: list[dict],
+) -> None:
+    """Collect type mappings from edge query results and update schema."""
+    if schema_id is None or not edges_data:
+        return
+
+    from graph_service.config import get_settings
+    from graph_service.models import get_schema, update_schema
+
+    settings = get_settings()
+    schema = await get_schema(settings.postgres_age_dsn, schema_id)
+    if not schema:
+        return
+
+    type_mapping: dict[str, dict[str, set[str]]] = {}
+    for edge in edges_data:
+        edge_name = edge.get('name', 'UNKNOWN')
+        if edge_name not in type_mapping:
+            type_mapping[edge_name] = {'source': set(), 'target': set()}
+
+        source_labels = edge.get('source_labels', [])
+        target_labels = edge.get('target_labels', [])
+        if isinstance(source_labels, str):
+            source_labels = [source_labels] if source_labels else []
+        if isinstance(target_labels, str):
+            target_labels = [target_labels] if target_labels else []
+
+        type_mapping[edge_name]['source'].update(source_labels)
+        type_mapping[edge_name]['target'].update(target_labels)
+
+    edge_types = schema.get('edge_types', [])
+    for et in edge_types:
+        if not isinstance(et, dict):
+            continue
+        et_name = et.get('name', '')
+        if et_name in type_mapping:
+            existing_source = set(et.get('source_types', []))
+            existing_target = set(et.get('target_types', []))
+            et['source_types'] = sorted(existing_source | type_mapping[et_name]['source'])
+            et['target_types'] = sorted(existing_target | type_mapping[et_name]['target'])
+
+    data = {
+        'name': schema['name'],
+        'description': schema.get('description', ''),
+        'entity_types': schema.get('entity_types', []),
+        'edge_types': edge_types,
+        'custom_instructions': schema.get('custom_instructions', ''),
+    }
+    await update_schema(settings.postgres_age_dsn, schema_id, data)
+
+
 @dataclass
 class JobInfo:
     """Metadata for a queued or in-progress job."""
@@ -63,7 +117,7 @@ class AsyncWorker:
     """Async job queue that tracks job metadata for status queries."""
 
     def __init__(self):
-        self.queue: asyncio.Queue[tuple[partial, JobInfo, object | None]] = asyncio.Queue()
+        self.queue: asyncio.Queue[tuple[partial, JobInfo, Context | None]] = asyncio.Queue()
         self.task = None
         # All jobs since startup (including completed/failed) — capped to last 100
         self._jobs: list[JobInfo] = []
@@ -222,6 +276,39 @@ async def add_episode(
             print(
                 f'  \u2713 add_episode completed for: {request.name}', flush=True, file=sys.stderr
             )
+
+            # Collect type mapping for schema by querying recent edges
+            try:
+                if request.schema_id:
+                    driver = task_graphiti.driver
+                    recent_edges, _, _ = await driver.execute_query(
+                        """
+                        SELECT e.name, e.source_node_uuid, e.target_node_uuid,
+                               s.labels as source_labels, t.labels as target_labels
+                        FROM entity_edges e
+                        JOIN entity_nodes s ON e.source_node_uuid = s.uuid
+                        JOIN entity_nodes t ON e.target_node_uuid = t.uuid
+                        WHERE e.group_id = %(group_id)s
+                        ORDER BY e.created_at DESC
+                        LIMIT 100
+                        """,
+                        params={'group_id': request.group_id},
+                    )
+                    edges_data = [
+                        {
+                            'name': r.get('name', 'UNKNOWN'),
+                            'source_labels': r.get('source_labels', []),
+                            'target_labels': r.get('target_labels', []),
+                        }
+                        for r in (recent_edges or [])
+                    ]
+                    await _update_schema_type_mapping_from_edges(request.schema_id, edges_data)
+            except Exception as map_err:
+                print(
+                    f'\u26a0\ufe0f Type mapping update failed: {map_err}',
+                    flush=True,
+                    file=sys.stderr,
+                )
         finally:
             if hasattr(task_graphiti, 'close'):
                 await task_graphiti.close()

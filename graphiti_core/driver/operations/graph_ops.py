@@ -75,3 +75,9 @@ class GraphMaintenanceOperations(ABC):
         executor: QueryExecutor,
         nodes: list[EntityNode],
     ) -> list[CommunityNode]: ...
+
+    @abstractmethod
+    async def rebuild_age_projection(
+        self,
+        executor: QueryExecutor,
+    ) -> None: ...

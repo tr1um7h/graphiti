@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -171,17 +171,21 @@ async def get_graph_groups(graphiti: ZepGraphitiDep):
     """
     Get all available group IDs.
 
-    Returns list of group IDs with node counts.
+    Returns list of group IDs with episode and entity counts.
     """
     try:
         driver = graphiti.driver
 
         results, _, _ = await driver.execute_query(
             """
-            SELECT group_id, COUNT(*) as count
-            FROM episodic_nodes
-            GROUP BY group_id
-            ORDER BY count DESC
+            SELECT g.group_id, g.episode_count, COALESCE(e.entity_count, 0) as entity_count
+            FROM (
+                SELECT group_id, COUNT(*) as episode_count FROM episodic_nodes GROUP BY group_id
+            ) g
+            LEFT JOIN (
+                SELECT group_id, COUNT(*) as entity_count FROM entity_nodes GROUP BY group_id
+            ) e ON g.group_id = e.group_id
+            ORDER BY g.episode_count DESC
             """
         )
 
@@ -191,7 +195,8 @@ async def get_graph_groups(graphiti: ZepGraphitiDep):
                 {
                     'id': record.get('group_id', ''),
                     'name': record.get('group_id', ''),
-                    'count': record.get('count', 0),
+                    'episode_count': record.get('episode_count', 0),
+                    'entity_count': record.get('entity_count', 0),
                 }
             )
 
@@ -348,13 +353,21 @@ async def get_graph_schema(graphiti: ZepGraphitiDep):
     try:
         driver = graphiti.driver
 
-        # Query node count
-        nodes_result, _, _ = await driver.execute_query(
-            'SELECT COUNT(*) as count FROM entity_nodes'
+        # Query node labels with counts
+        labels_result, _, _ = await driver.execute_query(
+            """
+            SELECT UNNEST(labels) as label, COUNT(*) as count
+            FROM entity_nodes GROUP BY label ORDER BY count DESC
+            """
         )
-        total_nodes = nodes_result[0]['count'] if nodes_result else 0
 
-        node_labels = [SchemaNodeLabel(label='Entity', count=total_nodes)]
+        node_labels = []
+        for record in labels_result or []:
+            node_labels.append(
+                SchemaNodeLabel(
+                    label=record.get('label', 'Unknown'), count=record.get('count', 0)
+                )
+            )
 
         # Query relationship types
         edges_result, _, _ = await driver.execute_query(
@@ -441,6 +454,347 @@ async def get_graph_timeline(graphiti: ZepGraphitiDep, limit: int = 20):
         print(f'❌ Error in get_graph_timeline: {e}', flush=True)
         traceback.print_exc()
         return []
+
+
+# ---------------------------------------------------------------------------
+# GET /rest/memory-schema — card-column visualization data
+# ---------------------------------------------------------------------------
+@router.get('/memory-schema', status_code=status.HTTP_200_OK)
+@_graph_endpoint
+async def get_memory_schema(
+    graphiti: ZepGraphitiDep,
+    group_id: str | None = Query(default=None, description='Filter data by group ID'),
+):
+    """
+    Get memory schema data for card-column visualization.
+
+    Returns 4 columns (episodes by source, entities by label, types, communities)
+    with item-level edges and detail-panel connection data.
+
+    Optionally filtered by group_id.
+    """
+    driver = graphiti.driver
+    gid_filter = '(%(group_id)s::text IS NULL OR group_id = %(group_id)s)'
+
+    COLOR_EPISODE = '#38d0e0'
+    COLOR_ENTITY = '#3ecf8e'
+    COLOR_TYPE = '#a78bfa'
+    COLOR_COMMUNITY = '#f0b840'
+    COLOR_ENTITY_EDGE = '#38d0e0'
+
+    # --- 1. Episodes grouped by source ---------------------------------------
+    episodes_result, _, _ = await driver.execute_query(
+        f"""
+        SELECT source,
+               jsonb_agg(jsonb_build_object('id', uuid, 'label', name)) as items,
+               COUNT(*) as count
+        FROM episodic_nodes
+        WHERE {gid_filter}
+        GROUP BY source ORDER BY source
+        """,
+        params={'group_id': group_id},
+    )
+
+    episode_cards: list[dict] = []
+    episode_uuids: set[str] = set()
+    for record in episodes_result or []:
+        source = record.get('source', 'unknown')
+        items = record.get('items', [])
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except (json.JSONDecodeError, TypeError):
+                items = []
+        for item in items:
+            if item.get('id'):
+                episode_uuids.add(item['id'])
+        episode_cards.append(
+            {
+                'id': f'episode:{source}',
+                'title': source.upper(),
+                'color': COLOR_EPISODE,
+                'items': items,
+            }
+        )
+
+    # --- 2. Entities grouped by label ----------------------------------------
+    entities_result, _, _ = await driver.execute_query(
+        f"""
+        SELECT label,
+               jsonb_agg(jsonb_build_object('id', uuid, 'label', name)) as items,
+               COUNT(*) as count
+        FROM (
+            SELECT uuid, name, UNNEST(labels) as label
+            FROM entity_nodes
+            WHERE {gid_filter}
+        ) expanded
+        GROUP BY label ORDER BY count DESC
+        """,
+        params={'group_id': group_id},
+    )
+
+    entity_cards: list[dict] = []
+    # uuid -> set of labels (all labels, not just first)
+    entity_uuid_to_labels: dict[str, set[str]] = {}
+    entity_uuid_to_name: dict[str, str] = {}
+    for record in entities_result or []:
+        label = record.get('label', 'Unknown')
+        items = record.get('items', [])
+        if isinstance(items, str):
+            try:
+                items = json.loads(items)
+            except (json.JSONDecodeError, TypeError):
+                items = []
+        entity_cards.append(
+            {
+                'id': f'label:{label}',
+                'title': label.upper(),
+                'color': COLOR_ENTITY,
+                'items': items,
+            }
+        )
+        for item in items:
+            uid = item.get('id', '')
+            if uid:
+                entity_uuid_to_name[uid] = item.get('label', '')
+                entity_uuid_to_labels.setdefault(uid, set()).add(label)
+
+    # --- 3. Types: single card with all label names --------------------------
+    all_labels = sorted({lbl for labels in entity_uuid_to_labels.values() for lbl in labels})
+    type_items = [{'id': f'type:{lbl}', 'label': lbl} for lbl in all_labels]
+
+    type_cards = (
+        [
+            {
+                'id': 'entitytype',
+                'title': 'ENTITYTYPE',
+                'color': COLOR_TYPE,
+                'items': type_items,
+            }
+        ]
+        if type_items
+        else []
+    )
+
+    # --- 4. Communities (summaries) ------------------------------------------
+    communities_result, _, _ = await driver.execute_query(
+        f"""
+        SELECT uuid, name, summary
+        FROM community_nodes
+        WHERE {gid_filter}
+        ORDER BY created_at DESC
+        """,
+        params={'group_id': group_id},
+    )
+
+    community_items: list[dict] = []
+    community_uuids: set[str] = set()
+    for record in communities_result or []:
+        uid = record.get('uuid', '')
+        name = record.get('name', '')
+        summary = record.get('summary', '')
+        community_uuids.add(uid)
+        label = name if not summary else f'{name}'
+        community_items.append({'id': uid, 'label': label, 'summary': summary})
+
+    summary_cards = (
+        [
+            {
+                'id': 'community',
+                'title': 'COMMUNITY',
+                'color': COLOR_COMMUNITY,
+                'items': community_items,
+            }
+        ]
+        if community_items
+        else []
+    )
+
+    # --- 5. Build item-level edges -------------------------------------------
+    edges: list[dict] = []
+
+    # 5a. episode → entity (via episodic_edges)
+    ep_edges_result, _, _ = await driver.execute_query(
+        f"""
+        SELECT source_node_uuid, target_node_uuid
+        FROM episodic_edges
+        WHERE {gid_filter}
+        """,
+        params={'group_id': group_id},
+    )
+    for record in ep_edges_result or []:
+        ep_uid = record.get('source_node_uuid', '')
+        en_uid = record.get('target_node_uuid', '')
+        if ep_uid and en_uid:
+            edges.append(
+                {
+                    'source': ep_uid,
+                    'target': en_uid,
+                    'label': 'is_part_of',
+                    'color': COLOR_ENTITY,
+                }
+            )
+
+    # 5b. entity → type (via labels)
+    for uid, labels in entity_uuid_to_labels.items():
+        for label in labels:
+            edges.append(
+                {
+                    'source': uid,
+                    'target': f'type:{label}',
+                    'label': 'is_a',
+                    'color': COLOR_TYPE,
+                }
+            )
+
+    # 5c. entity → community (via community_edges)
+    all_entity_uuids = list(entity_uuid_to_name.keys())
+    comm_edges_result: list[dict] = []
+    if all_entity_uuids and community_uuids:
+        comm_edges_result, _, _ = await driver.execute_query(
+            f"""
+            SELECT source_node_uuid, target_node_uuid
+            FROM community_edges
+            WHERE {gid_filter}
+            """,
+            params={'group_id': group_id},
+        )
+        for record in comm_edges_result or []:
+            comm_uid = record.get('source_node_uuid', '')
+            en_uid = record.get('target_node_uuid', '')
+            if comm_uid and en_uid:
+                edges.append(
+                    {
+                        'source': en_uid,
+                        'target': comm_uid,
+                        'label': 'has_member',
+                        'color': COLOR_COMMUNITY,
+                    }
+                )
+
+    # 5d. entity → entity (via entity_edges, limited)
+    ent_edges_result: list[dict] = []
+    if all_entity_uuids:
+        ent_edges_result, _, _ = await driver.execute_query(
+            """
+            SELECT name, fact, source_node_uuid, target_node_uuid
+            FROM entity_edges
+            WHERE (source_node_uuid = ANY(%(node_uuids)s)
+               OR target_node_uuid = ANY(%(node_uuids)s))
+              AND (%(group_id)s::text IS NULL OR group_id = %(group_id)s)
+            LIMIT 500
+            """,
+            params={'node_uuids': all_entity_uuids, 'group_id': group_id},
+        )
+        for record in ent_edges_result or []:
+            src = record.get('source_node_uuid', '')
+            tgt = record.get('target_node_uuid', '')
+            name = record.get('name', '')
+            if src and tgt:
+                edges.append(
+                    {
+                        'source': src,
+                        'target': tgt,
+                        'label': name,
+                        'color': COLOR_ENTITY_EDGE,
+                    }
+                )
+
+    # --- 6. Build detail panel data (keyed by UUID) --------------------------
+    details: dict[str, dict] = {}
+
+    # Entity details: from entity_edges
+    if all_entity_uuids:
+        for record in ent_edges_result or []:
+            src = record.get('source_node_uuid', '')
+            tgt = record.get('target_node_uuid', '')
+            name = record.get('name', '')
+            fact = record.get('fact', '')
+
+            # source entity connections
+            if src in entity_uuid_to_name:
+                entry = details.setdefault(
+                    src,
+                    {
+                        'name': entity_uuid_to_name.get(src, ''),
+                        'type': ', '.join(sorted(entity_uuid_to_labels.get(src, set()))) or '',
+                        'parent': next(iter(entity_uuid_to_labels.get(src, set())), None),
+                        'connections': [],
+                    },
+                )
+                # forward tag to target entity name
+                tgt_name = entity_uuid_to_name.get(tgt, '')
+                if tgt_name:
+                    entry['connections'].append({'dir': 'forward', 'kind': 'tag', 'text': tgt_name})
+                # quote
+                if fact:
+                    entry['connections'].append({'dir': 'forward', 'kind': 'quote', 'text': fact})
+
+            # target entity connections
+            if tgt in entity_uuid_to_name:
+                entry = details.setdefault(
+                    tgt,
+                    {
+                        'name': entity_uuid_to_name.get(tgt, ''),
+                        'type': ', '.join(sorted(entity_uuid_to_labels.get(tgt, set()))) or '',
+                        'parent': next(iter(entity_uuid_to_labels.get(tgt, set())), None),
+                        'connections': [],
+                    },
+                )
+                src_name = entity_uuid_to_name.get(src, '')
+                if src_name:
+                    entry['connections'].append({'dir': 'backward', 'kind': 'tag', 'text': src_name})
+                if fact:
+                    entry['connections'].append({'dir': 'backward', 'kind': 'quote', 'text': fact})
+
+    # Add type tags to entity details
+    for uid, labels in entity_uuid_to_labels.items():
+        entry = details.setdefault(
+            uid,
+            {
+                'name': entity_uuid_to_name.get(uid, ''),
+                'type': ', '.join(sorted(labels)) or '',
+                'parent': next(iter(labels), None),
+                'connections': [],
+            },
+        )
+        for label in labels:
+            entry['connections'].insert(0, {'dir': 'forward', 'kind': 'tag', 'text': label})
+
+    # Episode details
+    for record in ep_edges_result or []:
+        ep_uid = record.get('source_node_uuid', '')
+        en_uid = record.get('target_node_uuid', '')
+        en_name = entity_uuid_to_name.get(en_uid, '')
+        if ep_uid and en_name:
+            entry = details.setdefault(ep_uid, {'name': '', 'type': 'episode', 'parent': None, 'connections': []})
+            entry['connections'].append({'dir': 'forward', 'kind': 'tag', 'text': en_name})
+
+    # Community details
+    for record in comm_edges_result or []:
+        comm_uid = record.get('source_node_uuid', '')
+        en_uid = record.get('target_node_uuid', '')
+        en_name = entity_uuid_to_name.get(en_uid, '')
+        if comm_uid and en_name:
+            comm_name = next((c['label'] for c in community_items if c['id'] == comm_uid), '')
+            entry = details.setdefault(comm_uid, {'name': comm_name, 'type': 'community', 'parent': None, 'connections': []})
+            entry['connections'].append({'dir': 'backward', 'kind': 'tag', 'text': en_name})
+
+    return {
+        'columns': [
+            {'id': 'episodes', 'cards': episode_cards},
+            {'id': 'entities', 'cards': entity_cards},
+            {'id': 'summaries', 'cards': summary_cards},
+        ],
+        'edges': edges,
+        'details': details,
+        'group_id': group_id,
+        'counts': {
+            'episodes': sum(len(c['items']) for c in episode_cards),
+            'entities': len(entity_uuid_to_name),
+            'summaries': len(community_items),
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +926,9 @@ async def clone_group(
             )
 
     # 6. Rebuild AGE graph projection (includes all groups)
-    await driver.graph_ops.rebuild_age_projection(driver)
+    graph_ops = driver.graph_ops
+    if graph_ops is not None:
+        await graph_ops.rebuild_age_projection(driver)
 
     # 7. Build table counts for response
     table_counts: dict[str, int] = {}

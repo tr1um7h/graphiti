@@ -52,32 +52,35 @@ class TracingMiddleware:
         start_time = time.time()
 
         try:
-            with self.tracer.start_as_current_span(
-                'http.server.request',
-                attributes={
-                    'http.method': method,
-                    'http.route': route,
-                },
-            ) as span:
-                status_code = {'value': 0}
+            if self.tracer is not None:
+                with self.tracer.start_as_current_span(
+                    'http.server.request',
+                    attributes={
+                        'http.method': method,
+                        'http.route': route,
+                    },
+                ) as span:
+                    status_code = {'value': 0}
 
-                async def send_wrapper(message):
-                    if message['type'] == 'http.response.start':
-                        status_code['value'] = message.get('status', 0)
-                    await send(message)
+                    async def send_wrapper(message):
+                        if message['type'] == 'http.response.start':
+                            status_code['value'] = message.get('status', 0)
+                        await send(message)
 
-                await self.app(scope, receive, send_wrapper)
+                    await self.app(scope, receive, send_wrapper)
 
-                if status_code['value']:
-                    span.set_attribute('http.status_code', status_code['value'])
-                    if status_code['value'] >= 500:
-                        span.set_status(StatusCode.ERROR)
+                    if status_code['value']:
+                        span.set_attribute('http.status_code', status_code['value'])
+                        if status_code['value'] >= 500:
+                            span.set_status(StatusCode.ERROR)
 
-                    # Record API metrics
-                    from graph_service.observability import record_api_request
+                        # Record API metrics
+                        from graph_service.observability import record_api_request
 
-                    duration_ms = (time.time() - start_time) * 1000
-                    record_api_request(method, route, status_code['value'], duration_ms)
+                        duration_ms = (time.time() - start_time) * 1000
+                        record_api_request(method, route, status_code['value'], duration_ms)
+            else:
+                await self.app(scope, receive, send)
         finally:
             context.detach(token)
 

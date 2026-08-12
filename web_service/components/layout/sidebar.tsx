@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   BarChart3,
+  Brain,
   Network,
   FolderOpen,
   Menu,
@@ -29,6 +30,11 @@ const navItems: NavItem[] = [
     label: 'Graph',
     href: '/graph',
     icon: <Network className="h-4 w-4" />,
+  },
+  {
+    label: 'Memory Schema',
+    href: '/memory-schema',
+    icon: <Brain className="h-4 w-4" />,
   },
   {
     label: 'Knowledge',

@@ -13,6 +13,8 @@ class TypeDefinition(BaseModel):
     name: str
     description: str = ''
     attributes: list[AttributeDefinition] = []
+    source_types: list[str] = []
+    target_types: list[str] = []
 
 
 class ExtractionSchemaCreate(BaseModel):

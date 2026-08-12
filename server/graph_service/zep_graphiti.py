@@ -76,7 +76,7 @@ def _create_llm_client(settings: Settings) -> LLMClient | None:
         base_url=base_url,
         model=model,
         small_model=model,
-        temperature=None,
+        temperature=0,
         max_tokens=settings.openai_max_tokens,
     )
     return OpenAIGenericClient(config=config)
@@ -164,7 +164,9 @@ class ZepGraphiti(Graphiti):
 
         # Rebuild AGE graph projection after bulk delete
         try:
-            await driver.graph_ops.rebuild_age_projection(driver)
+            graph_ops = driver.graph_ops
+            if graph_ops is not None:
+                await graph_ops.rebuild_age_projection(driver)
         except Exception as e:
             logger.warning(f'Failed to rebuild AGE projection after group delete: {e}')
 
