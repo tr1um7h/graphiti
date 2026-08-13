@@ -111,7 +111,8 @@
   body.focused .card-item:not(.selected):not(.related){display:none;}
   body.focused .card:has(.card-item.selected),
   body.focused .card:has(.card-item.related){opacity:1;}
-  body.focused .card:not(:has(.card-item.selected)):not(:has(.card-item.related)){opacity:.15;}
+  body.focused .card:not(:has(.card-item.selected)):not(:has(.card-item.related)){display:none;}
+  body.focused .column:not(:has(.card-item.selected)):not(:has(.card-item.related)){display:none;}
 
   /* ─── BOTTOM CONTROLS ─── */
   .bottom-controls{position:absolute;left:28px;bottom:24px;z-index:5;display:flex;gap:10px;}

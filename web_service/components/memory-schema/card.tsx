@@ -18,23 +18,25 @@ export function Card({ card }: { card: CardType }) {
     ? card.items.filter((item) => focusedItemId === item.id || relatedItemIds.has(item.id))
     : card.items;
 
-  const displayItems = visibleItems.slice(0, expandedCount);
-  const hasMore = visibleItems.length > expandedCount;
+  const displayItems = focusedItemId ? visibleItems : visibleItems.slice(0, expandedCount);
+  const hasMore = !focusedItemId && visibleItems.length > expandedCount;
 
-  const isDimmed = focusedItemId && visibleItems.length === 0;
+  const isHidden = focusedItemId && visibleItems.length === 0;
 
   const handleExpand = () => {
     setExpandedCount((prev) => prev + EXPAND_STEP);
   };
 
   return (
-    <div
-      id={`card-${card.id}`}
-      className={cn(
-        'rounded-lg border bg-card p-2.5 mb-6 transition-opacity duration-250',
-        isDimmed && 'opacity-15'
-      )}
-    >
+   <div
+     id={`card-${card.id}`}
+     data-memory-card
+      data-card-color={card.color}
+     className={cn(
+       'rounded-lg border bg-card p-2.5 mb-6 transition-opacity duration-250',
+       isHidden && 'hidden'
+     )}
+   >
       <div className="flex items-center gap-2 mb-2">
         <span
           className="h-[7px] w-[7px] rounded-full flex-shrink-0"

@@ -6,7 +6,7 @@ import { useOntologyStore } from '@/stores/ontology-store';
 import { OntologySelector } from '@/components/memory-schema/ontology-selector';
 import { Canvas } from '@/components/memory-schema/canvas';
 import { DetailPanel } from '@/components/memory-schema/detail-panel';
-import { Brain, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 
 export default function MemorySchemaClient() {
   const {
@@ -77,8 +77,6 @@ export default function MemorySchemaClient() {
   }, [selectedGroupId, setSchemaData, setLoading, setError]);
 
   const displayName = selectedGroupId ?? 'All Groups';
-  const counts = schemaData?.counts;
-
   if (loading) return <div className="flex flex-1 items-center justify-center text-muted-foreground">加载中...</div>;
   if (error) return <div className="flex flex-1 items-center justify-center text-destructive">{error}</div>;
 
@@ -105,37 +103,8 @@ export default function MemorySchemaClient() {
       </header>
 
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-7 pb-4">
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground">
-            <Brain className="h-3 w-3" /> Model: Automatic
-          </div>
-          <div className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground">
-            Prompt: Automatic
-          </div>
-          <div className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground">
-            Ontology: Automatic
-          </div>
-          {counts && (
-            <>
-              <div className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground">
-                Episodes: <span className="font-medium text-foreground">{counts.episodes}</span>
-              </div>
-              <div className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground">
-                Entities: <span className="font-medium text-foreground">{counts.entities}</span>
-              </div>
-              <div className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs text-muted-foreground">
-                Summaries: <span className="font-medium text-foreground">{counts.summaries}</span>
-              </div>
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <OntologySelector />
-          <div className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs">
-            <RefreshCw className="h-3 w-3" /> Re-process
-          </div>
-        </div>
+      <div className="flex items-center justify-end px-7 pb-4">
+        <OntologySelector />
       </div>
 
       {/* Canvas */}

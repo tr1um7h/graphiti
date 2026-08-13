@@ -621,7 +621,7 @@ async def get_memory_schema(
         name = record.get('name', '')
         summary = record.get('summary', '')
         community_uuids.add(uid)
-        label = name if not summary else f'{name}'
+        label = f'{name}: {summary[:80]}' if summary else name
         community_items.append({'id': uid, 'label': label, 'summary': summary})
 
     summary_cards = (
@@ -752,7 +752,14 @@ async def get_memory_schema(
                 # forward tag to target entity name
                 tgt_name = entity_uuid_to_name.get(tgt, '')
                 if tgt_name:
-                    entry['connections'].append({'dir': 'forward', 'kind': 'tag', 'text': tgt_name})
+                    entry['connections'].append(
+                        {
+                            'dir': 'forward',
+                            'kind': 'tag',
+                            'text': tgt_name,
+                            'target_id': tgt,
+                        }
+                    )
                 # quote
                 if fact:
                     entry['connections'].append({'dir': 'forward', 'kind': 'quote', 'text': fact})
@@ -770,7 +777,14 @@ async def get_memory_schema(
                 )
                 src_name = entity_uuid_to_name.get(src, '')
                 if src_name:
-                    entry['connections'].append({'dir': 'backward', 'kind': 'tag', 'text': src_name})
+                    entry['connections'].append(
+                        {
+                            'dir': 'backward',
+                            'kind': 'tag',
+                            'text': src_name,
+                            'target_id': src,
+                        }
+                    )
                 if fact:
                     entry['connections'].append({'dir': 'backward', 'kind': 'quote', 'text': fact})
 
@@ -786,7 +800,51 @@ async def get_memory_schema(
             },
         )
         for label in labels:
-            entry['connections'].insert(0, {'dir': 'forward', 'kind': 'tag', 'text': label})
+            entry['connections'].insert(
+                0,
+                {
+                    'dir': 'forward',
+                    'kind': 'tag',
+                    'text': label,
+                    'target_id': f'type:{label}',
+                },
+            )
+
+    # Normalize entity parent navigation and keep the first label deterministic.
+    for uid, labels in entity_uuid_to_labels.items():
+        entry = details.get(uid)
+        if not entry:
+            continue
+        parent = sorted(labels)[0] if labels else None
+        entry['parent'] = parent
+        entry['parent_id'] = f'type:{parent}' if parent else None
+
+    # Type details: clicking a TYPES item shows its member entities
+    for lbl in all_labels:
+        type_item_id = f'type:{lbl}'
+        member_pairs = sorted(
+            (
+                (uid, entity_uuid_to_name[uid])
+                for uid, labels in entity_uuid_to_labels.items()
+                if lbl in labels and entity_uuid_to_name.get(uid)
+            ),
+            key=lambda pair: pair[1],
+        )
+        details[type_item_id] = {
+            'name': lbl,
+            'type': 'entitytype',
+            'parent': None,
+            'parent_id': None,
+            'connections': [
+                {
+                    'dir': 'backward',
+                    'kind': 'tag',
+                    'text': entity_name,
+                    'target_id': uid,
+                }
+                for uid, entity_name in member_pairs
+            ],
+        }
 
     # Episode details
     for record in ep_edges_result or []:
@@ -794,8 +852,19 @@ async def get_memory_schema(
         en_uid = record.get('target_node_uuid', '')
         en_name = entity_uuid_to_name.get(en_uid, '')
         if ep_uid and en_name:
-            entry = details.setdefault(ep_uid, {'name': '', 'type': 'episode', 'parent': None, 'connections': []})
-            entry['connections'].append({'dir': 'forward', 'kind': 'tag', 'text': en_name})
+            entry = details.setdefault(
+                ep_uid,
+                {
+                    'name': '',
+                    'type': 'episode',
+                    'parent': None,
+                    'parent_id': None,
+                    'connections': [],
+                },
+            )
+            entry['connections'].append(
+                {'dir': 'forward', 'kind': 'tag', 'text': en_name, 'target_id': en_uid}
+            )
 
     # Community details
     for record in comm_edges_result or []:
@@ -804,13 +873,25 @@ async def get_memory_schema(
         en_name = entity_uuid_to_name.get(en_uid, '')
         if comm_uid and en_name:
             comm_name = next((c['label'] for c in community_items if c['id'] == comm_uid), '')
-            entry = details.setdefault(comm_uid, {'name': comm_name, 'type': 'community', 'parent': None, 'connections': []})
-            entry['connections'].append({'dir': 'backward', 'kind': 'tag', 'text': en_name})
+            entry = details.setdefault(
+                comm_uid,
+                {
+                    'name': comm_name,
+                    'type': 'community',
+                    'parent': None,
+                    'parent_id': None,
+                    'connections': [],
+                },
+            )
+            entry['connections'].append(
+                {'dir': 'backward', 'kind': 'tag', 'text': en_name, 'target_id': en_uid}
+            )
 
     return {
         'columns': [
             {'id': 'episodes', 'cards': episode_cards},
             {'id': 'entities', 'cards': entity_cards},
+            {'id': 'types', 'cards': type_cards},
             {'id': 'summaries', 'cards': summary_cards},
         ],
         'edges': edges,
@@ -819,6 +900,7 @@ async def get_memory_schema(
         'counts': {
             'episodes': sum(len(c['items']) for c in episode_cards),
             'entities': len(entity_uuid_to_name),
+            'types': len(type_items),
             'summaries': len(community_items),
         },
     }

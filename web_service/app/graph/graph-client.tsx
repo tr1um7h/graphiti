@@ -6,6 +6,7 @@ import { GraphCanvas } from '@/components/graph/graph-canvas';
 import { GraphControls } from '@/components/graph/graph-controls';
 import { GraphLegend } from '@/components/graph/graph-legend';
 import { GraphSearch } from '@/components/graph/graph-search';
+import { MemoryView } from '@/components/memory-schema/memory-view';
 import { useGraphStore } from '@/stores/graph-store';
 import { useChatStore } from '@/stores/chat-store';
 import type { GraphApiResponse } from '@/lib/types';
@@ -19,6 +20,7 @@ interface Group {
 export default function GraphPageClient() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [selectedGroup, setSelectedGroup] = useState<string>('');
+  const [viewMode, setViewMode] = useState<'graph' | 'memory'>('graph');
 
   // Whether a search-driven focus is active (to show "clear" button)
   const centerNode = useGraphStore((s) => s.centerNode);
@@ -90,14 +92,42 @@ export default function GraphPageClient() {
     <div className="-m-6 flex h-[calc(100vh-3.5rem)] flex-col">
       {/* Toolbar */}
       <div className="flex items-center gap-3 border-b px-4 py-2">
-        <GraphSearch groupId={groupId} onSelect={handleSearchSelect} />
-        {centerNode && (
+        {/* View mode switcher */}
+        <div className="flex items-center rounded-lg border overflow-hidden">
           <button
-            onClick={handleClearFocus}
-            className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+            onClick={() => setViewMode('graph')}
+            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+              viewMode === 'graph'
+                ? 'bg-accent text-foreground'
+                : 'text-muted-foreground hover:bg-accent/50'
+            }`}
           >
-            返回全图
+            Graph
           </button>
+          <button
+            onClick={() => setViewMode('memory')}
+            className={`px-3 py-1.5 text-xs font-medium border-l transition-colors ${
+              viewMode === 'memory'
+                ? 'bg-accent text-foreground'
+                : 'text-muted-foreground hover:bg-accent/50'
+            }`}
+          >
+            Memory
+          </button>
+       </div>
+
+        {viewMode === 'graph' && (
+          <>
+            <GraphSearch groupId={groupId} onSelect={handleSearchSelect} />
+            {centerNode && (
+              <button
+                onClick={handleClearFocus}
+                className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
+              >
+                返回全图
+              </button>
+            )}
+          </>
         )}
         <div className="flex-1" />
         <select
@@ -111,7 +141,7 @@ export default function GraphPageClient() {
             </option>
           ))}
         </select>
-        <GraphControls />
+        {viewMode === 'graph' && <GraphControls />}
       </div>
 
       {/* Main area — Canvas left, Panel right */}
@@ -123,13 +153,17 @@ export default function GraphPageClient() {
               暂无分组数据
             </div>
           ) : (
-            <GraphCanvas groupId={groupId} />
+            viewMode === 'graph' ? (
+              <GraphCanvas groupId={groupId} />
+            ) : (
+              <MemoryView groupId={groupId} />
+            )
           )}
         </div>
       </div>
 
-      {/* Legend bar */}
-      <GraphLegend />
+      {/* Legend bar — only for graph view */}
+      {viewMode === 'graph' && <GraphLegend />}
     </div>
   );
 }

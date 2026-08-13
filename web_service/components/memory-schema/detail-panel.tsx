@@ -2,6 +2,7 @@
 
 import { useOntologyStore } from '@/stores/ontology-store';
 import { ArrowLeft, X } from 'lucide-react';
+import type { Connection, NodeDetail } from '@/lib/types';
 
 export function DetailPanel() {
   const schemaData = useOntologyStore((s) => s.schemaData);
@@ -24,7 +25,15 @@ export function DetailPanel() {
     >
       {/* Top bar */}
       <div className="flex items-center justify-between px-5 pt-5 pb-4">
-        <div className="flex items-center gap-1 text-sm text-muted-foreground cursor-pointer hover:text-foreground">
+        <div
+          className="flex items-center gap-1 text-sm text-muted-foreground cursor-pointer hover:text-foreground"
+          onClick={() => {
+            const parentId =
+              detail?.parent_id ||
+              (detail?.parent ? findItemIdByLabel(schemaData.columns, detail.parent) : null);
+            if (parentId) setFocusedItem(parentId);
+          }}
+        >
           <ArrowLeft className="h-3.5 w-3.5" />
           <span>{detail?.parent || ''}</span>
         </div>
@@ -53,9 +62,9 @@ export function DetailPanel() {
 
 function findItemDetail(
   columns: { id: string; cards: { id: string; items: { id: string; label: string }[] }[] }[],
-  details: Record<string, { name: string; type: string; parent: string | null; connections: { dir: string; kind: string; text: string }[] }>,
+  details: Record<string, NodeDetail>,
   itemId: string | null
-): { label: string; detail: { name: string; type: string; parent: string | null; connections: { dir: string; kind: string; text: string }[] } | null } {
+): { label: string; detail: NodeDetail | null } {
   if (!itemId) return { label: '', detail: null };
 
   for (const col of columns) {
@@ -74,7 +83,7 @@ function findItemDetail(
 }
 
 function renderConnections(
-  connections: { dir: string; kind: string; text: string }[],
+  connections: Connection[],
   schemaData: { columns: { cards: { items: { id: string; label: string }[] }[] }[] },
   setFocusedItem: (id: string | null) => void
 ) {
@@ -96,8 +105,8 @@ function renderConnections(
         <div
           className="flex items-center justify-center bg-muted border rounded-lg px-3.5 py-2 text-sm mb-0.5 cursor-pointer hover:border-[#3ecf8e] hover:text-[#3ecf8e]"
           onClick={() => {
-            // Find item by label and focus it
-            const itemId = findItemIdByLabel(schemaData.columns, conn.text);
+            const itemId =
+              conn.target_id || findItemIdByLabel(schemaData.columns, conn.text);
             if (itemId) setFocusedItem(itemId);
           }}
         >

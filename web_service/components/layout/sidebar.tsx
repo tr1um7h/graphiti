@@ -32,11 +32,6 @@ const navItems: NavItem[] = [
     icon: <Network className="h-4 w-4" />,
   },
   {
-    label: 'Memory Schema',
-    href: '/memory-schema',
-    icon: <Brain className="h-4 w-4" />,
-  },
-  {
     label: 'Knowledge',
     href: '/knowledge',
     icon: <FolderOpen className="h-4 w-4" />,

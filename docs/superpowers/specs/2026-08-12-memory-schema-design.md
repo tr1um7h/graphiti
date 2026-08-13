@@ -4,7 +4,7 @@
 
 Graphiti web service 已有 Graph 视图（`/graph`）用于可视化知识图谱的实体实例和关系。但缺少一个**从数据源到摘要的全链路视图**——即 episode → entity → type → community 的提取与聚合过程。
 
-本设计新增 **Memory Schema** 视图，以**多列卡片 + SVG 连线**布局展示这条链路，类似 Cognee 的 Memory Schema 视图。用户选定 group_id 后，可以直观看到：
+本设计在 **Graph 页面**（`/graph`）新增 **Memory Schema** 视图模式，以**多列卡片 + SVG 连线**布局展示这条链路，类似 Cognee 的 Memory Schema 视图。Graph 页面顶部提供 Graph / Memory 分段切换器，默认显示 Graph 视图；切换到 Memory 时，上方 toolbar（含 group 选择器）保持不变，下方画布替换为 Memory Schema。用户选定 group_id 后，可以直观看到：
 
 - 这个 group 里有哪些 episode（原始数据）
 - 从 episode 中提取了哪些 entity，按什么 type 分类
@@ -57,7 +57,7 @@ EPISODES ──→ ENTITIES ──→ TYPES
 
 ## Data Flow（连线）
 
-列与列之间的 SVG 贝塞尔曲线表示数据流向，标注关系类型和数量：
+连线默认只用于 Focus 状态。未选中 item 时画布只有卡片和 items；点击 item 后，才展示与该 item 直接相连的 Focus item edges。关系仍按以下规则聚合：
 
 | 连线 | 来源 | 标签格式 | 说明 |
 |------|------|---------|------|
@@ -67,6 +67,18 @@ EPISODES ──→ ENTITIES ──→ TYPES
 | ENTITIES → ENTITIES | `entity_edges` | `<edge_name> ×N` | 同列连线，实体间关系（如 `won ×2`） |
 
 连线颜色与目标列一致（episode→entity 用 green，entity→type 用 purple，entity→summary 用 amber）。
+
+Focus 层不应绘制原始单条边的重复线；前端按 `source + target + label + color` 聚合，显示 `label ×N`，避免一个 focus item 对同一关系画出一排不可读的曲线。
+
+### Demo Alignment Decisions
+
+为了贴近 `~/Downloads/memory_schema.html`，本设计做出以下澄清：
+
+1. **默认不显示任何连线**，保持 Overview 画布干净；点击 item 后进入 Focus 状态并展示 item 级连线。
+2. **Focus 时只显示与 focus item 直接相关的边**，并且按关系类型聚合。
+3. 边的标签使用主题感知的 pill/HTML 层，不硬编码 SVG `textPath` 的深色文字和白色描边。
+4. `TYPES` 必须作为真实 column 返回和渲染；否则 `is_a` 关系在画布上不可见。
+5. Detail Panel 的 tag 跳转使用稳定 ID，而不是通过 label 文本反查。
 
 ---
 
@@ -108,7 +120,7 @@ EPISODES ──→ ENTITIES ──→ TYPES
 
 4 列卡片从左到右排列，每列有列标题，每张卡有颜色点 + 名称 + 计数 + 实例项。底部缩放控制。
 
-**默认不显示任何连线**——画布只有卡片和 items，干净无干扰。连线只在 Focus State 下出现。
+**默认不显示任何连线**，画布只有卡片和 items；Focus 状态才绘制 item 级细线。
 
 ### Focus State（点击卡片项）
 
@@ -117,7 +129,7 @@ EPISODES ──→ ENTITIES ──→ TYPES
 1. **高亮选中项**：绿色 outline
 2. **只显示关联对象**：根据 `edges` 数据，计算与选中项直接相连的所有 items，这些 items 保持可见并高亮
 3. **隐藏无关联项**：与选中项没有直接关系的 items **完全隐藏**（`display: none`），不是变暗——画面上只留下有意义的关联链路
-4. **显示连线**：选中项与其关联项之间出现 SVG 贝塞尔曲线，标注关系类型（如 `is_a`、`has_member`、`won ×2`）
+4. **显示连线**：选中项与其关联项之间出现 Focus item edges；关系类型按 `source + target + label + color` 聚合并标注数量（如 `is_part_of ×3`、`won ×2`）
 5. **Detail Panel 滑入**：右侧面板展示选中项的完整 connections（forward/backward tags + quotes）
 6. **顶部提示**："Focused on xxx | Clear focus"
 
@@ -135,7 +147,7 @@ Panel 内的 tag（如 `→ animal`、`← sherlock holmes`）可点击 → 切�
 
 ### Clear Focus
 
-点击 "Clear focus" 或画布空白区域 → 隐藏所有连线 → 恢复所有 items 可见 → Detail Panel 滑出 → 回到 Overview。
+点击 "Clear focus" 或画布空白区域 → 隐藏 item 级连线 → 恢复所有 items 可见 → Detail Panel 滑出 → 回到 Overview。
 
 ---
 
@@ -160,6 +172,10 @@ Panel 内的 tag（如 `→ animal`、`← sherlock holmes`）可点击 → 切�
 - **Fit**：重置为 1.0
 - CSS `transform: scale()` 作用于 canvas 容器
 
+### 选中自动 Fit
+
+点击任意 item 进入 Focus 状态后，画布自动调用 `fitView()` 将内容适配到视口，无需手动点击 Fit 按钮。数据首次加载时同样自动 Fit。
+
 ---
 
 ## API
@@ -168,10 +184,10 @@ Panel 内的 tag（如 `→ animal`、`← sherlock holmes`）可点击 → 切�
 
 一次性返回前端画布所需的全部结构化数据：
 
-- **columns**：4 列数据，每列含若干卡片，每卡含若干 items
-- **edges**：卡片间的连线（source card id、target card id、label、color）
-- **details**：按 UUID 索引的 Detail Panel 数据
-- **counts**：各列的卡片/项目计数
+- **columns**：4 列数据（episodes / entities / types / summaries），每列含若干卡片，每卡含若干 items
+- **edges**：Focus 状态下 item 级连线，可继续由前端按关系类型聚合
+- **details**：按 UUID（或 type ID）索引的 Detail Panel 数据
+- **counts**：各列的卡片/项目计数，必须包含 `types`
 
 前端通过 BFF route（`/api/memory-schema`）代理调用，不做复杂重组——后端直接返回列结构，前端直接渲染。
 
@@ -189,6 +205,23 @@ Panel 内的 tag（如 `→ animal`、`← sherlock holmes`）可点击 → 切�
 8. **Detail Panel**：按实体 UUID 查到 connections，tag 可点击跳转并联动画布
 9. **Clear focus**：点击 Clear 或空白区域 → 隐藏连线 + 恢复所有 items → 回到 Overview
 10. **空数据**：group_id 无数据时显示明确提示，不是空白页
+11. **TYPES 列**：响应和前端类型都必须包含 `types`，点击 type item 能显示对应实体的 Detail Panel 内容
+
+### Graph 页面集成
+
+- **入口**：Graph 页面顶部新增 Graph / Memory 分段切换器（segmented control）。
+- **默认**：`graph` 模式，展示原有 GraphCanvas。
+- **Memory 模式**：toolbar（group 选择器）保持不变，Graph 专属控件（搜索、GraphControls、Legend）隐藏；下方渲染 Memory Schema 画布（Canvas + DetailPanel）。
+- **数据流**：MemoryView 接收 `groupId` prop，同步到 ontology store 后请求 `/api/memory-schema?group_id=` 获取数据。
+- **侧边栏**：移除独立的 "Memory Schema" 导航项，统一入口到 Graph 页面。
+
+### UI 精简
+
+Memory Schema toolbar 移除了以下冗余元素，保持画布区域干净：
+- Episodes / Entities / Summaries 计数 badge
+- Model / Prompt / Ontology "Automatic" badge
+- Re-process 按钮
+- Transformations 标签
 
 ---
 

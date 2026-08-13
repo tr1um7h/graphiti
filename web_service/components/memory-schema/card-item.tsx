@@ -16,7 +16,7 @@ export function CardItem({ item }: { item: CardItemType }) {
     <div
       data-itemid={item.id}
       className={cn(
-        'px-1.5 py-1 text-sm rounded-md cursor-pointer leading-relaxed',
+        'px-1.5 py-1 text-xs rounded-md cursor-pointer leading-relaxed',
         'hover:bg-accent/50',
         isSelected && 'outline outline-[1.5px] outline-[#3ecf8e] bg-[rgba(62,207,142,0.08)] text-[#3ecf8e]',
         isRelated && !isSelected && 'text-[#3ecf8e] bg-[rgba(62,207,142,0.05)]'

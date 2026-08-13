@@ -215,6 +215,7 @@ export interface TypeItem {
 export interface CardItem {
   id: string;
   label: string;
+  summary?: string;
 }
 
 export interface Card {
@@ -227,7 +228,7 @@ export interface Card {
 }
 
 export interface Column {
-  id: 'episodes' | 'entities' | 'summaries';
+  id: 'episodes' | 'entities' | 'types' | 'summaries';
   cards: Card[];
 }
 
@@ -242,6 +243,7 @@ export interface Connection {
   dir: 'forward' | 'backward' | 'none';
   kind: 'tag' | 'quote';
   text: string;
+  target_id?: string;
 }
 
 export interface NodeDetail {
@@ -249,6 +251,7 @@ export interface NodeDetail {
   name: string;
   type: string;
   parent: string | null;
+  parent_id?: string | null;
   connections: Connection[];
 }
 
@@ -260,6 +263,7 @@ export interface MemorySchemaData {
   counts: {
     episodes: number;
     entities: number;
+    types: number;
     summaries: number;
   };
 }
